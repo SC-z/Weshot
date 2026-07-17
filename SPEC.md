@@ -1,6 +1,6 @@
 # WeShot 产品规范
 
-- 版本：1.2.7（build 13）
+- 版本：2.0.0（build 14）
 - 平台：macOS 15.2+，Apple Silicon
 
 ## 1. 产品目标
