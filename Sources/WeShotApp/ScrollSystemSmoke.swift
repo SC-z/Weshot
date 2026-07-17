@@ -80,8 +80,7 @@ enum ScrollSystemSmokeRunner {
         let snapshot = ScreenSnapshot(
             screen: screen,
             displayID: displayID,
-            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1),
-            candidates: []
+            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1)
         )
         let localRect = DesktopCoordinateMapper.localFrame(
             fromAppKit: window.frame,

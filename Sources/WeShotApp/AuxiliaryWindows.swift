@@ -173,22 +173,7 @@ final class PinWindowController: NSWindowController {
             size.width > 0 && size.height > 0 ? size : nil
         } ?? pixelPointSize
 
-        let minimumScale = max(120 / requested.width, 80 / requested.height)
-        let capScale = min(
-            720 / max(requested.width, requested.height),
-            visibleFrame.width / requested.width,
-            visibleFrame.height / requested.height
-        )
-        let displayScale = min(max(1, minimumScale), capScale)
-        let effectiveMinimumScale = min(minimumScale, capScale)
-        let displaySize = CGSize(
-            width: requested.width * displayScale,
-            height: requested.height * displayScale
-        )
-        let minimumSize = CGSize(
-            width: requested.width * effectiveMinimumScale,
-            height: requested.height * effectiveMinimumScale
-        )
+        let displaySize = requested
         let panelOrigin = CGPoint(
             x: min(max(visibleFrame.minX, origin.x), max(visibleFrame.minX, visibleFrame.maxX - displaySize.width)),
             y: min(max(visibleFrame.minY, origin.y), max(visibleFrame.minY, visibleFrame.maxY - displaySize.height))
@@ -206,10 +191,13 @@ final class PinWindowController: NSWindowController {
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.minSize = CGSize(
-            width: min(minimumSize.width, visibleFrame.width),
-            height: min(minimumSize.height, visibleFrame.height)
+            width: min(displaySize.width, 24),
+            height: min(displaySize.height, 24)
         )
-        panel.maxSize = visibleFrame.size
+        panel.maxSize = CGSize(
+            width: max(displaySize.width, visibleFrame.width),
+            height: max(displaySize.height, visibleFrame.height)
+        )
         panel.aspectRatio = requested
         super.init(window: panel)
         panel.delegate = self
@@ -259,6 +247,34 @@ final class PinImageView: NSImageView {
         closeItem.target = self
         menu.addItem(closeItem)
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard let window, event.scrollingDeltaY != 0 else { return }
+        let sensitivity: CGFloat = event.hasPreciseScrollingDeltas ? 0.008 : 0.12
+        let requestedScale = exp(event.scrollingDeltaY * sensitivity)
+        let frame = window.frame
+        let minimumScale = max(
+            window.minSize.width / frame.width,
+            window.minSize.height / frame.height
+        )
+        let maximumScale = min(
+            window.maxSize.width / frame.width,
+            window.maxSize.height / frame.height
+        )
+        let scale = min(max(requestedScale, minimumScale), maximumScale)
+        guard abs(scale - 1) > 0.001 else { return }
+
+        let size = CGSize(width: frame.width * scale, height: frame.height * scale)
+        window.setFrame(
+            CGRect(
+                x: frame.midX - size.width / 2,
+                y: frame.midY - size.height / 2,
+                width: size.width,
+                height: size.height
+            ),
+            display: true
+        )
     }
 
     @objc private func closePin() { window?.close() }

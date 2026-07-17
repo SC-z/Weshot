@@ -2,7 +2,7 @@
 .swiftpm/
 DerivedData/
 build/
-#outputs/
+outputs/
 work/
 vcpkg_installed/
 *.xcuserstate

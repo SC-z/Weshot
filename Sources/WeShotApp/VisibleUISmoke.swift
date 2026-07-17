@@ -35,7 +35,6 @@ enum VisibleUISmokeFailure: LocalizedError {
 }
 
 struct VisibleUISmokeResult {
-    let candidateCount: Int
     let evidenceURL: URL
     let savedURL: URL
 }
@@ -179,7 +178,6 @@ enum VisibleUISmokeRunner {
         }
 
         return VisibleUISmokeResult(
-            candidateCount: snapshot.candidates.count,
             evidenceURL: evidenceURL,
             savedURL: savedURL
         )
