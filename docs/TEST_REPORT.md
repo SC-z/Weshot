@@ -1,8 +1,8 @@
-# WeShot 1.2.7 测试报告
+# WeShot 2.0.0 测试报告
 
 - 平台：macOS 15.2+，Apple Silicon
 - 工具链：Swift 6.1，Xcode Command Line Tools
-- 产物：`WeShot.app` 1.2.7（build 13）
+- 产物：`WeShot.app` 2.0.0（build 14）
 
 ## 自动化结果
 
