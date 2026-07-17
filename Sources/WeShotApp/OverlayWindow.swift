@@ -109,6 +109,7 @@ final class OverlayView: NSView, NSTextFieldDelegate {
     private let dimColor = NSColor(calibratedWhite: 0, alpha: 0.53)
 
     override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     init(frame frameRect: NSRect, snapshot: ScreenSnapshot, controller: OverlayWindowController) {
         self.snapshot = snapshot
