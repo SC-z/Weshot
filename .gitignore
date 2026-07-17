@@ -1,0 +1,13 @@
+.build/
+.swiftpm/
+DerivedData/
+build/
+outputs/
+work/
+*.xcuserstate
+xcuserdata/
+*.ips
+*.log
+.env
+.env.*
+.DS_Store
