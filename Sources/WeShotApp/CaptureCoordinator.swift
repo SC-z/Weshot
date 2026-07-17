@@ -7,7 +7,6 @@ struct ScreenSnapshot {
     let screen: NSScreen
     let displayID: CGDirectDisplayID
     let image: CGImage
-    let candidates: [WindowCandidate]
 }
 
 enum ScreenCaptureFailure: LocalizedError {
@@ -27,7 +26,6 @@ enum DesktopCaptureService {
     static func captureAllScreens() async throws -> [ScreenSnapshot] {
         let screens = NSScreen.screens
         guard !screens.isEmpty else { throw ScreenCaptureFailure.noScreens }
-        let candidates = enumerateWindowCandidates()
         var snapshots: [ScreenSnapshot] = []
         var failures: [String] = []
         for screen in screens {
@@ -47,8 +45,7 @@ enum DesktopCaptureService {
                 } else {
                     image = try await captureDisplayFallback(displayID: displayID, screen: screen)
                 }
-                let visibleCandidates = candidates.filter { $0.frame.intersects(screen.frame) }
-                snapshots.append(ScreenSnapshot(screen: screen, displayID: displayID, image: image, candidates: visibleCandidates))
+                snapshots.append(ScreenSnapshot(screen: screen, displayID: displayID, image: image))
             } catch {
                 failures.append("\(screen.localizedName)：\(error.localizedDescription)")
             }
@@ -127,33 +124,6 @@ enum DesktopCaptureService {
     static func displayID(for screen: NSScreen) -> CGDirectDisplayID? {
         guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
         return CGDirectDisplayID(number.uint32Value)
-    }
-
-    static func enumerateWindowCandidates() -> [WindowCandidate] {
-        guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[CFString: Any]] else {
-            return []
-        }
-        let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        return raw.compactMap { info -> WindowCandidate? in
-            guard let pid = (info[kCGWindowOwnerPID] as? NSNumber)?.int32Value,
-                  pid != ownPID,
-                  let number = (info[kCGWindowNumber] as? NSNumber)?.uint32Value,
-                  let layer = (info[kCGWindowLayer] as? NSNumber)?.intValue,
-                  layer == 0,
-                  let alpha = (info[kCGWindowAlpha] as? NSNumber)?.doubleValue,
-                  alpha > 0.02,
-                  let boundsDictionary = info[kCGWindowBounds] as? NSDictionary,
-                  let cgRect = CGRect(dictionaryRepresentation: boundsDictionary) else { return nil }
-            guard cgRect.width >= 80, cgRect.height >= 45 else { return nil }
-            let appKitRect = DesktopCoordinateMapper.appKitFrame(
-                fromQuartz: cgRect,
-                primaryDesktopTop: primaryTop
-            )
-            let owner = info[kCGWindowOwnerName] as? String ?? ""
-            let title = info[kCGWindowName] as? String ?? ""
-            return WindowCandidate(frame: appKitRect, windowID: number, ownerName: owner, title: title, layer: layer)
-        }
     }
 
     static func fixtureImage(size: CGSize, scale: CGFloat = 2) -> CGImage {

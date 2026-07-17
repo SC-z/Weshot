@@ -101,36 +101,7 @@ struct EditorStyle {
     var emoji = "😀"
 }
 
-struct WindowCandidate {
-    let frame: CGRect
-    let windowID: CGWindowID
-    let ownerName: String
-    let title: String
-    let layer: Int
-
-    func snapFrame(on screenFrame: CGRect) -> CGRect? {
-        let clipped = frame.intersection(screenFrame)
-        guard !clipped.isNull,
-              clipped.width >= 1,
-              clipped.height >= 1,
-              clipped.width * clipped.height < screenFrame.width * screenFrame.height * 0.9
-        else { return nil }
-        return clipped
-    }
-}
-
 enum DesktopCoordinateMapper {
-    /// Quartz window-list rectangles use a top-left desktop origin while AppKit
-    /// uses a bottom-left origin anchored to the primary display.
-    static func appKitFrame(fromQuartz frame: CGRect, primaryDesktopTop: CGFloat) -> CGRect {
-        CGRect(
-            x: frame.minX,
-            y: primaryDesktopTop - frame.maxY,
-            width: frame.width,
-            height: frame.height
-        )
-    }
-
     static func localFrame(fromAppKit frame: CGRect, screenFrame: CGRect) -> CGRect {
         frame.offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY)
     }
@@ -323,7 +294,6 @@ struct StylePaletteLayout {
 
 final class CaptureEditorState {
     var selection: CGRect?
-    var hoveredWindow: WindowCandidate?
     var tool: CaptureTool = .selection
     var style = EditorStyle()
     var annotations: [AppAnnotation] = []
