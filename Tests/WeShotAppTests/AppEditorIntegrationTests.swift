@@ -13,8 +13,7 @@ struct AppEditorIntegrationTests {
         let snapshot = ScreenSnapshot(
             screen: screen,
             displayID: DesktopCaptureService.displayID(for: screen) ?? CGMainDisplayID(),
-            image: DesktopCaptureService.fixtureImage(size: size, scale: 1),
-            candidates: []
+            image: DesktopCaptureService.fixtureImage(size: size, scale: 1)
         )
         let coordinator = CaptureCoordinator()
         let controller = OverlayWindowController(snapshot: snapshot, coordinator: coordinator)
@@ -135,8 +134,7 @@ struct AppEditorIntegrationTests {
         let snapshot = ScreenSnapshot(
             screen: screen,
             displayID: DesktopCaptureService.displayID(for: screen) ?? CGMainDisplayID(),
-            image: DesktopCaptureService.fixtureImage(size: size, scale: 1),
-            candidates: []
+            image: DesktopCaptureService.fixtureImage(size: size, scale: 1)
         )
         let controller = OverlayWindowController(snapshot: snapshot, coordinator: CaptureCoordinator())
         let view = try #require(controller.overlayView)
@@ -160,94 +158,25 @@ struct AppEditorIntegrationTests {
         controller.close()
     }
 
-    @Test("Window hover snaps selection and desktop coordinates cover vertical displays")
-    func windowHoverAndDesktopCoordinates() throws {
+    @Test("Custom selection starts at the pointer without window snapping")
+    func customSelectionStartsAtPointer() throws {
         let screen = try #require(NSScreen.main)
-        let localCandidate = CGRect(x: 90, y: 110, width: 420, height: 260)
-        let globalCandidate = localCandidate.offsetBy(
-            dx: screen.frame.minX,
-            dy: screen.frame.minY
-        )
-        let crossingCandidate = CGRect(
-            x: screen.frame.maxX - 80,
-            y: screen.frame.minY + 50,
-            width: 240,
-            height: 150
-        )
-        let nearFullScreenCandidate = screen.frame.insetBy(dx: 1, dy: 1)
         let snapshot = ScreenSnapshot(
             screen: screen,
             displayID: DesktopCaptureService.displayID(for: screen) ?? CGMainDisplayID(),
-            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1),
-            candidates: [
-                WindowCandidate(
-                    frame: globalCandidate,
-                    windowID: 42,
-                    ownerName: "Fixture",
-                    title: "Window",
-                    layer: 0
-                ),
-                WindowCandidate(
-                    frame: crossingCandidate,
-                    windowID: 43,
-                    ownerName: "Fixture",
-                    title: "Cross-display window",
-                    layer: 0
-                ),
-                WindowCandidate(
-                    frame: nearFullScreenCandidate,
-                    windowID: 44,
-                    ownerName: "Fixture",
-                    title: "Near-full-screen window",
-                    layer: 0
-                ),
-            ]
+            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1)
         )
         let coordinator = CaptureCoordinator()
         let controller = OverlayWindowController(snapshot: snapshot, coordinator: coordinator)
         let view = try #require(controller.overlayView)
-        let point = CGPoint(x: localCandidate.midX, y: localCandidate.midY)
         let windowNumber = controller.window?.windowNumber ?? 0
-        view.mouseMoved(with: mouseEvent(.mouseMoved, at: point, windowNumber: windowNumber))
-        #expect(view.state.hoveredWindow?.windowID == 42)
-        view.mouseDown(with: mouseEvent(.leftMouseDown, at: point, windowNumber: windowNumber))
-        view.mouseUp(with: mouseEvent(.leftMouseUp, at: point, windowNumber: windowNumber))
-        #expect(view.state.selection == localCandidate)
-
-        view.deactivateSelection()
-        let crossingPoint = CGPoint(x: screen.frame.width - 20, y: 90)
-        view.mouseMoved(with: mouseEvent(.mouseMoved, at: crossingPoint, windowNumber: windowNumber))
-        let clipped = try #require(view.state.hoveredWindow?.frame)
-        #expect(view.state.hoveredWindow?.windowID == 43)
-        #expect(abs(clipped.maxX - screen.frame.width) < 0.001)
-        #expect(abs(clipped.width - 80) < 0.001)
-
-        view.deactivateSelection()
-        let emptyPoint = CGPoint(x: screen.frame.width * 0.75, y: screen.frame.height * 0.75)
-        view.mouseMoved(with: mouseEvent(.mouseMoved, at: emptyPoint, windowNumber: windowNumber))
-        #expect(view.state.hoveredWindow == nil)
-
-        let primary = DesktopCoordinateMapper.appKitFrame(
-            fromQuartz: CGRect(x: 0, y: 0, width: 1920, height: 1080),
-            primaryDesktopTop: 1080
-        )
-        let above = DesktopCoordinateMapper.appKitFrame(
-            fromQuartz: CGRect(x: 0, y: -900, width: 1600, height: 900),
-            primaryDesktopTop: 1080
-        )
-        let below = DesktopCoordinateMapper.appKitFrame(
-            fromQuartz: CGRect(x: 0, y: 1080, width: 1600, height: 900),
-            primaryDesktopTop: 1080
-        )
-        #expect(primary == CGRect(x: 0, y: 0, width: 1920, height: 1080))
-        #expect(above == CGRect(x: 0, y: 1080, width: 1600, height: 900))
-        #expect(below == CGRect(x: 0, y: -900, width: 1600, height: 900))
-        #expect(
-            DesktopCoordinateMapper.localFrame(
-                fromAppKit: CGRect(x: -1280, y: 56, width: 1280, height: 1024),
-                screenFrame: CGRect(x: -1280, y: 56, width: 1280, height: 1024)
-            ) == CGRect(x: 0, y: 0, width: 1280, height: 1024)
-        )
+        let start = CGPoint(x: 90, y: 110)
+        let end = CGPoint(x: 510, y: 370)
+        view.mouseDown(with: mouseEvent(.leftMouseDown, at: start, windowNumber: windowNumber))
+        #expect(view.state.selection == nil)
+        view.mouseDragged(with: mouseEvent(.leftMouseDragged, at: end, windowNumber: windowNumber))
+        view.mouseUp(with: mouseEvent(.leftMouseUp, at: end, windowNumber: windowNumber))
+        #expect(view.state.selection == CGRect.from(start, end))
         controller.close()
     }
 
@@ -327,8 +256,7 @@ struct AppEditorIntegrationTests {
         let snapshot = ScreenSnapshot(
             screen: screen,
             displayID: DesktopCaptureService.displayID(for: screen) ?? CGMainDisplayID(),
-            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1),
-            candidates: []
+            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1)
         )
         let coordinator = CaptureCoordinator()
         let controller = OverlayWindowController(snapshot: snapshot, coordinator: coordinator)
@@ -362,8 +290,7 @@ struct AppEditorIntegrationTests {
         let snapshot = ScreenSnapshot(
             screen: screen,
             displayID: DesktopCaptureService.displayID(for: screen) ?? CGMainDisplayID(),
-            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1),
-            candidates: []
+            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1)
         )
         let coordinator = CaptureCoordinator()
         let controller = OverlayWindowController(snapshot: snapshot, coordinator: coordinator)
@@ -441,13 +368,34 @@ struct AppEditorIntegrationTests {
         try CaptureOutputService.writePNGData(png, to: savedURL)
         #expect(try Data(contentsOf: savedURL) == png)
 
-        let pin = PinWindowController(image: image, origin: CGPoint(x: 40, y: 40))
+        let pinnedSize = CGSize(width: 320, height: 160)
+        let pin = PinWindowController(
+            image: image,
+            origin: CGPoint(x: 40, y: 40),
+            preferredSize: pinnedSize
+        )
         let window = try #require(pin.window)
         #expect(window.level == .floating)
         let pinView = try #require(window.contentView as? PinImageView)
         #expect(abs(window.aspectRatio.width / window.aspectRatio.height - 2) < 0.001)
+        #expect(abs(window.frame.width - pinnedSize.width) < 0.001)
+        #expect(abs(window.frame.height - pinnedSize.height) < 0.001)
         pin.showWindow(nil)
         #expect(window.isVisible)
+        let initialSize = window.frame.size
+        let scroll = try #require(
+            CGEvent(
+                scrollWheelEvent2Source: nil,
+                units: .line,
+                wheelCount: 1,
+                wheel1: 1,
+                wheel2: 0,
+                wheel3: 0
+            )
+        )
+        pinView.scrollWheel(with: try #require(NSEvent(cgEvent: scroll)))
+        #expect(window.frame.width > initialSize.width)
+        #expect(window.frame.height > initialSize.height)
         let doubleClick = try #require(NSEvent.mouseEvent(
             with: .leftMouseDown,
             location: CGPoint(x: 20, y: 20),

@@ -242,7 +242,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let result = try await CommandLineMode.runWorkflowSmoke(in: directory)
                     print(
                         "WORKFLOW_SMOKE PASS displays=\(result.displayCount) " +
-                            "candidates=\(result.candidateCount) " +
                             "size=\(result.width)x\(result.height) " +
                             "customSelection=PASS clipboard=PASS crossProcess=PASS " +
                             "file=PASS pin=PASS " +
@@ -297,8 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ).standardizedFileURL
                     let result = try await VisibleUISmokeRunner.run(in: directory)
                     print(
-                        "VISIBLE_UI_SMOKE PASS candidates=\(result.candidateCount) " +
-                            "overlay=PASS customSelection=PASS annotation=PASS translationOverlay=PASS noResultWindow=PASS " +
+                        "VISIBLE_UI_SMOKE PASS overlay=PASS customSelection=PASS annotation=PASS translationOverlay=PASS noResultWindow=PASS " +
                             "savePanelCancel=PASS restore=PASS savePanelConfirm=PASS " +
                             "pinDrag=PASS path=\(result.evidenceURL.path) saved=\(result.savedURL.path)"
                     )
@@ -762,7 +760,6 @@ enum CommandLineMode {
     struct TestResult { let passed: Bool; let message: String }
     struct WorkflowSmokeResult {
         let displayCount: Int
-        let candidateCount: Int
         let width: Int
         let height: Int
         let outputURL: URL
@@ -833,8 +830,7 @@ enum CommandLineMode {
         let snapshot = ScreenSnapshot(
             screen: screen,
             displayID: displayID,
-            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1),
-            candidates: []
+            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1)
         )
         let coordinator = CaptureCoordinator()
         let controller = OverlayWindowController(snapshot: snapshot, coordinator: coordinator)
@@ -945,7 +941,6 @@ enum CommandLineMode {
 
         return WorkflowSmokeResult(
             displayCount: snapshots.count,
-            candidateCount: snapshot.candidates.count,
             width: image.width,
             height: image.height,
             outputURL: outputURL

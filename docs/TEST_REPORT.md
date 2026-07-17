@@ -1,14 +1,14 @@
-# WeShot 1.2.6 测试报告
+# WeShot 1.2.7 测试报告
 
 - 平台：macOS 15.2+，Apple Silicon
 - 工具链：Swift 6.1，Xcode Command Line Tools
-- 产物：`WeShot.app` 1.2.6（build 12）
+- 产物：`WeShot.app` 1.2.7（build 13）
 
 ## 自动化结果
 
 | 门禁 | 结果 | 覆盖范围 |
 |---|---:|---|
-| Swift Testing | 40/40 PASS | 选区、窗口吸附、移动/缩放、快捷键、工具栏、标注、取色、翻译图层、文件输出、钉图、隐私规则和长图拼接 |
+| Swift Testing | 40/40 PASS | 自定义选区、移动/缩放、快捷键、工具栏、标注、取色、翻译图层、文件输出、原始尺寸钉图与滚轮缩放、隐私规则和长图拼接 |
 | 严格 Release 构建 | PASS | `-warn-concurrency -warnings-as-errors` |
 | Bundle 与签名 | PASS | arm64、AppIcon.icns、Info.plist、ad-hoc 签名、严格校验 |
 | 进程自测 | PASS | 几何、工具栏、标注、合成和 PNG 编码 |
@@ -31,6 +31,8 @@
 ## 已验证产品约束
 
 - 启动截图后默认自由框选，不自动选择全屏。
+- 截图启动路径不枚举或吸附窗口边缘。
+- 钉图默认保持截图尺寸，并支持滚轮缩放。
 - 长截图只采集选区，单帧也可完成。
 - 翻译结果直接进入原图半透明图层，不打开结果窗口。
 - 工具栏不包含独立文字识别、系统分享或演示入口。
