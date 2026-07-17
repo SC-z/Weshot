@@ -20,6 +20,8 @@ struct AppEditorIntegrationTests {
         let view = try #require(controller.overlayView)
         let windowNumber = controller.window?.windowNumber ?? 0
 
+        #expect(view.acceptsFirstMouse(for: nil))
+
         let start = CGPoint(x: size.width * 0.15, y: size.height * 0.18)
         let end = CGPoint(x: size.width * 0.68, y: size.height * 0.70)
         view.mouseDown(with: mouseEvent(.leftMouseDown, at: start, windowNumber: windowNumber))
