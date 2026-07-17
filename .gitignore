@@ -4,6 +4,7 @@ DerivedData/
 build/
 outputs/
 work/
+vcpkg_installed/
 *.xcuserstate
 xcuserdata/
 *.ips
