@@ -1,6 +1,6 @@
 # WeShot
 
-WeShot 是一个独立、原生、开源的 macOS 截图应用。它使用 Swift 与 AppKit 构建，截图、文字提取、隐私检测和图片合成都在本机完成。
+WeShot 是一个独立、原生、开源的 macOS 截图应用。它使用 Swift 与 AppKit 构建，截图、翻译、长截图和钉图功能。
 
 ## 功能
 
