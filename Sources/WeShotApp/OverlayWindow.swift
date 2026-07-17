@@ -72,7 +72,7 @@ final class OverlayPanel: NSPanel {
 
 private enum EditorInteraction {
     case none
-    case selecting(start: CGPoint, snapped: CGRect?)
+    case selecting(start: CGPoint)
     case moving(start: CGPoint, original: CGRect)
     case resizing(anchor: ResizeAnchor, start: CGPoint, original: CGRect)
     case annotating(start: CGPoint, current: CGPoint, points: [CGPoint])
@@ -85,7 +85,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
     let state = CaptureEditorState()
     private var interaction: EditorInteraction = .none
     private var cursorPoint: CGPoint = .zero
-    private var localCandidates: [WindowCandidate]
     private var trackingArea: NSTrackingArea?
     private var textField: NSTextField?
     private var textOrigin: CGPoint = .zero
@@ -114,19 +113,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
     init(frame frameRect: NSRect, snapshot: ScreenSnapshot, controller: OverlayWindowController) {
         self.snapshot = snapshot
         self.controller = controller
-        localCandidates = snapshot.candidates.compactMap { candidate in
-            guard let clippedFrame = candidate.snapFrame(on: snapshot.screen.frame) else { return nil }
-            return WindowCandidate(
-                frame: DesktopCoordinateMapper.localFrame(
-                    fromAppKit: clippedFrame,
-                    screenFrame: snapshot.screen.frame
-                ),
-                windowID: candidate.windowID,
-                ownerName: candidate.ownerName,
-                title: candidate.title,
-                layer: candidate.layer
-            )
-        }
         super.init(frame: frameRect)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -169,16 +155,13 @@ final class OverlayView: NSView, NSTextFieldDelegate {
             return
         }
 
-        let focusRect = state.selection ?? state.hoveredWindow?.frame
-        drawDimming(excluding: focusRect)
+        drawDimming(excluding: state.selection)
 
         if let selection = state.selection {
             drawAnnotations()
             drawSelection(selection, showsResizeHandles: stitchedImage == nil)
             drawSizeLabel(for: selection)
             drawToolbar(for: selection)
-        } else if let hover = state.hoveredWindow {
-            drawHover(hover)
         }
 
         drawDraftAnnotation()
@@ -203,17 +186,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         path.appendRect(rect.intersection(bounds))
         path.windingRule = .evenOdd
         path.fill()
-    }
-
-    private func drawHover(_ candidate: WindowCandidate) {
-        accent.setStroke()
-        let path = NSBezierPath(rect: candidate.frame.insetBy(dx: 0.5, dy: 0.5))
-        path.lineWidth = 1
-        path.stroke()
-        let caption = candidate.title.isEmpty ? candidate.ownerName : "\(candidate.ownerName) · \(candidate.title)"
-        if !caption.isEmpty {
-            drawPill(caption, at: CGPoint(x: candidate.frame.minX + 8, y: candidate.frame.maxY - 30), fontSize: 11)
-        }
     }
 
     private func drawSelection(_ rect: CGRect, showsResizeHandles: Bool) {
@@ -596,12 +568,7 @@ final class OverlayView: NSView, NSTextFieldDelegate {
 
     override func mouseMoved(with event: NSEvent) {
         cursorPoint = convert(event.locationInWindow, from: nil)
-        guard state.selection == nil else {
-            updateCursor(at: cursorPoint)
-            needsDisplay = true
-            return
-        }
-        state.hoveredWindow = localCandidates.first(where: { $0.frame.contains(cursorPoint) })
+        if state.selection != nil { updateCursor(at: cursorPoint) }
         needsDisplay = true
     }
 
@@ -653,8 +620,8 @@ final class OverlayView: NSView, NSTextFieldDelegate {
             if stitchedImage != nil { return }
         }
         controller.coordinator?.overlayBecameActive(controller)
-        interaction = .selecting(start: point, snapped: state.hoveredWindow?.frame)
-        state.selection = state.hoveredWindow?.frame
+        interaction = .selecting(start: point)
+        state.selection = nil
         state.annotations.removeAll()
         state.tool = .selection
         needsDisplay = true
@@ -665,9 +632,8 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         cursorPoint = point
         switch interaction {
         case .none: break
-        case .selecting(let start, let snapped):
-            let distance = hypot(point.x - start.x, point.y - start.y)
-            state.selection = distance < 3 ? snapped ?? CGRect.from(start, point) : CGRect.from(start, point).intersection(bounds)
+        case .selecting(let start):
+            state.selection = CGRect.from(start, point).intersection(bounds)
         case .moving(let start, let original):
             var moved = original.offsetBy(dx: point.x - start.x, dy: point.y - start.y)
             if moved.minX < bounds.minX { moved.origin.x = bounds.minX }
@@ -700,7 +666,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         default: break
         }
         interaction = .none
-        state.hoveredWindow = nil
         needsDisplay = true
     }
 
@@ -970,7 +935,7 @@ final class OverlayView: NSView, NSTextFieldDelegate {
             .mosaic(CGRect(x: selection.maxX - 150, y: selection.maxY - 95, width: 110, height: 46), 10),
         ]
         cursorPoint = CGPoint(x: selection.maxX - 28, y: selection.maxY - 28)
-        interaction = .selecting(start: cursorPoint, snapped: nil)
+        interaction = .selecting(start: cursorPoint)
         needsDisplay = true
         displayIfNeeded()
     }
@@ -980,7 +945,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         state.selection = nil
         state.annotations.removeAll()
         state.tool = .selection
-        state.hoveredWindow = nil
         needsDisplay = true
     }
 
