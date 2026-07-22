@@ -53,6 +53,8 @@ The bundle is created at `build/WeShot.app`.
 
 ## Test
 
+The full test suite requires Swift Testing from Xcode. Command Line Tools alone can build the app but cannot run these tests.
+
 ```zsh
 ./scripts/test_all.sh
 ./scripts/test_system.sh
@@ -73,4 +75,3 @@ docs/                 Test report and sanitized development record
 ```
 
 See [SPEC.md](SPEC.md) for product behavior and acceptance criteria, and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance. Released under the [MIT License](LICENSE).
-

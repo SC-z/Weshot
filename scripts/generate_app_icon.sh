@@ -8,6 +8,8 @@ OUTPUT="$ROOT/build/AppIcon.icns"
 
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
+qlmanage -t -s 1024 -o "$ICONSET" "$SOURCE" >/dev/null
+RASTER="$ICONSET/${SOURCE:t}.png"
 
 for entry in \
     "16 icon_16x16.png" \
@@ -23,8 +25,9 @@ for entry in \
 do
     size="${entry%% *}"
     name="${entry#* }"
-    sips -s format png -z "$size" "$size" "$SOURCE" --out "$ICONSET/$name" >/dev/null
+    sips -s format png -z "$size" "$size" "$RASTER" --out "$ICONSET/$name" >/dev/null
 done
 
+rm -f "$RASTER"
 iconutil -c icns "$ICONSET" -o "$OUTPUT"
 print "$OUTPUT"

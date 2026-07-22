@@ -318,6 +318,26 @@ struct AppEditorIntegrationTests {
         controller.close()
     }
 
+    @Test("Scroll capture lets the stitcher reject duplicate frames")
+    func scrollCaptureDefersDuplicateDetectionToStitcher() throws {
+        let screen = try #require(NSScreen.main)
+        let snapshot = ScreenSnapshot(
+            screen: screen,
+            displayID: DesktopCaptureService.displayID(for: screen) ?? CGMainDisplayID(),
+            image: DesktopCaptureService.fixtureImage(size: screen.frame.size, scale: 1)
+        )
+        let controller = OverlayWindowController(snapshot: snapshot, coordinator: CaptureCoordinator())
+        defer { controller.close() }
+        let view = try #require(controller.overlayView)
+        view.state.selection = CGRect(x: 20, y: 20, width: 24, height: 24)
+        #expect(view.beginScrollMode())
+        #expect(view.scrollFrameCount == 0)
+        let frame = try #require(makeSolidImage(width: 24, height: 24, color: (42, 99, 173)))
+        #expect(view.scrollCaptureDidFinish(frame, error: nil))
+        #expect(view.scrollCaptureDidFinish(frame, error: nil))
+        #expect(view.scrollFrameCount == 2)
+    }
+
     @Test("Scroll controls preserve the selected region and expose Finish")
     func scrollControls() throws {
         let screen = try #require(NSScreen.main)
@@ -329,6 +349,10 @@ struct AppEditorIntegrationTests {
         #expect(controller.selectionBorderWindow.ignoresMouseEvents)
         #expect(controller.selectionBorderWindow.sharingType == .none)
         #expect(controller.finishButton.title == "结束")
+        controller.showWindow(nil)
+        #expect(controller.window?.isKeyWindow == false)
+        controller.updateStatus("已拼接 2 帧")
+        #expect(controller.statusLabel.stringValue == "已拼接 2 帧")
         let preview = try #require(makeSolidImage(width: 80, height: 220, color: (20, 80, 140)))
         controller.updatePreview(preview)
         #expect(controller.previewImageView.image?.size == CGSize(width: 80, height: 220))

@@ -289,7 +289,7 @@ final class ScrollControlPanelController: NSWindowController {
     let previewWindow: NSWindow
     let previewImageView: NSImageView
     let finishButton: NSButton
-    private let makesKeyOnShow: Bool
+    let statusLabel: NSTextField
 
     init(near selection: CGRect, on screen: NSScreen?, excludedFromCapture: Bool = true) {
         let size = CGSize(width: 330, height: 38)
@@ -314,7 +314,7 @@ final class ScrollControlPanelController: NSWindowController {
         panel.hasShadow = false
         panel.isReleasedWhenClosed = false
         panel.sharingType = excludedFromCapture ? .none : .readOnly
-        makesKeyOnShow = excludedFromCapture
+        panel.becomesKeyOnlyIfNeeded = true
 
         let border = NSPanel(
             contentRect: selection,
@@ -370,6 +370,12 @@ final class ScrollControlPanelController: NSWindowController {
         finish.contentTintColor = .white
         finish.translatesAutoresizingMaskIntoConstraints = false
         finishButton = finish
+        let status = NSTextField(labelWithString: "滚动页面截取更多内容")
+        status.font = .systemFont(ofSize: 13, weight: .medium)
+        status.textColor = .white
+        status.lineBreakMode = .byTruncatingTail
+        status.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel = status
         super.init(window: panel)
 
         panel.onFinish = { [weak self] in self?.onFinish?() }
@@ -379,22 +385,18 @@ final class ScrollControlPanelController: NSWindowController {
         background.wantsLayer = true
         background.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.76).cgColor
         background.layer?.cornerRadius = 7
-        let title = NSTextField(labelWithString: "滚动页面截取更多内容")
-        title.font = .systemFont(ofSize: 13, weight: .medium)
-        title.textColor = .white
-        title.translatesAutoresizingMaskIntoConstraints = false
         finish.target = self
         finish.action = #selector(finishScrolling)
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancelScrolling))
         cancel.bezelStyle = .rounded
         cancel.translatesAutoresizingMaskIntoConstraints = false
-        background.addSubview(title)
+        background.addSubview(status)
         background.addSubview(cancel)
         background.addSubview(finish)
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 10),
-            title.centerYAnchor.constraint(equalTo: background.centerYAnchor),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: cancel.leadingAnchor, constant: -8),
+            status.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 10),
+            status.centerYAnchor.constraint(equalTo: background.centerYAnchor),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: cancel.leadingAnchor, constant: -8),
             cancel.centerYAnchor.constraint(equalTo: background.centerYAnchor),
             cancel.widthAnchor.constraint(equalToConstant: 52),
             finish.leadingAnchor.constraint(equalTo: cancel.trailingAnchor, constant: 6),
@@ -411,15 +413,7 @@ final class ScrollControlPanelController: NSWindowController {
     override func showWindow(_ sender: Any?) {
         selectionBorderWindow.orderFrontRegardless()
         previewWindow.orderFrontRegardless()
-        if makesKeyOnShow {
-            super.showWindow(sender)
-            window?.orderFrontRegardless()
-            window?.makeKey()
-        } else {
-            // Visual smoke mode must not become key: an approval/Return event
-            // from the harness would otherwise look like the user's Finish.
-            window?.orderFrontRegardless()
-        }
+        window?.orderFrontRegardless()
     }
 
     override func close() {
@@ -434,6 +428,8 @@ final class ScrollControlPanelController: NSWindowController {
             size: CGSize(width: image.width, height: image.height)
         )
     }
+
+    func updateStatus(_ text: String) { statusLabel.stringValue = text }
 
     @objc private func finishScrolling() { onFinish?() }
     @objc private func cancelScrolling() { onCancel?() }

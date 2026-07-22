@@ -91,7 +91,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
     private var messageExpiry: Date?
     private var messageTimer: Timer?
     private var scrollFrames: [CGImage] = []
-    private var scrollFrameSignatures: [UInt64] = []
     private var stitchedImage: CGImage?
     private var isCapturingScrollFrame = false
     private var scrollCapturedBytes = 0
@@ -1009,11 +1008,12 @@ final class OverlayView: NSView, NSTextFieldDelegate {
             return false
         }
         guard let selection = state.selection,
-              let initial = ImageComposer.compose(base: snapshot.image, viewBounds: bounds, selection: selection, annotations: []) else { return false }
+              selection.standardized.intersection(bounds).width >= 1,
+              selection.standardized.intersection(bounds).height >= 1
+        else { return false }
         state.scrolling = true
-        scrollFrames = [initial]
-        scrollFrameSignatures = [Self.scrollFrameSignature(initial)]
-        scrollCapturedBytes = Self.byteCount(of: initial)
+        scrollFrames.removeAll(keepingCapacity: true)
+        scrollCapturedBytes = 0
         scrollFrameLimitReached = false
         state.tool = .selection
         showTransientMessage("滚动页面开始采集")
@@ -1031,24 +1031,20 @@ final class OverlayView: NSView, NSTextFieldDelegate {
     func scrollCaptureDidFinish(_ image: CGImage?, error: Error?) -> Bool {
         isCapturingScrollFrame = false
         if let image {
-            let signature = Self.scrollFrameSignature(image)
-            if scrollFrameSignatures.last != signature {
-                let imageBytes = Self.byteCount(of: image)
-                let (nextBytes, overflow) = scrollCapturedBytes.addingReportingOverflow(imageBytes)
-                guard !overflow,
-                      scrollFrames.count < Self.maximumScrollFrames,
-                      nextBytes <= Self.maximumScrollBytes
-                else {
-                    scrollFrameLimitReached = true
-                    showTransientMessage("已达长图采集上限，请完成拼接")
-                    return false
-                }
-                scrollFrames.append(image)
-                scrollFrameSignatures.append(signature)
-                scrollCapturedBytes = nextBytes
-                showTransientMessage("已采集 \(scrollFrames.count) 帧")
-                return true
+            let imageBytes = Self.byteCount(of: image)
+            let (nextBytes, overflow) = scrollCapturedBytes.addingReportingOverflow(imageBytes)
+            guard !overflow,
+                  scrollFrames.count < Self.maximumScrollFrames,
+                  nextBytes <= Self.maximumScrollBytes
+            else {
+                scrollFrameLimitReached = true
+                showTransientMessage("已达长图采集上限，请完成拼接")
+                return false
             }
+            scrollFrames.append(image)
+            scrollCapturedBytes = nextBytes
+            showTransientMessage("已采集 \(scrollFrames.count) 帧")
+            return true
         } else if let error {
             showTransientMessage("采集失败：\(error.localizedDescription)")
         }
@@ -1058,7 +1054,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
     func discardLastScrollFrame() {
         guard scrollFrames.count > 1 else { return }
         let removed = scrollFrames.removeLast()
-        scrollFrameSignatures.removeLast()
         scrollCapturedBytes = max(0, scrollCapturedBytes - Self.byteCount(of: removed))
         scrollFrameLimitReached = false
     }
@@ -1082,7 +1077,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
             state.selection = Self.previewRect(for: image, inside: bounds)
         }
         scrollFrames.removeAll()
-        scrollFrameSignatures.removeAll()
         scrollCapturedBytes = 0
         scrollFrameLimitReached = false
         needsDisplay = true
@@ -1111,27 +1105,6 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         )
     }
 
-    private static func scrollFrameSignature(_ image: CGImage) -> UInt64 {
-        let width = 24
-        let height = 24
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        pixels.withUnsafeMutableBytes { storage in
-            guard let context = CGContext(
-                data: storage.baseAddress,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
-            ) else { return }
-            context.interpolationQuality = .low
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        }
-        return pixels.reduce(UInt64(1_469_598_103_934_665_603)) { hash, byte in
-            (hash ^ UInt64(byte)) &* 1_099_511_628_211
-        }
-    }
 }
 
 private extension CGRect {
