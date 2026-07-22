@@ -7,6 +7,7 @@ Native, local-first screenshots for macOS.
 ## Quick links
 
 - [Product specification](SPEC.md)
+- [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 - [Contributors](CONTRIBUTORS.md)
 - [MIT License](LICENSE)

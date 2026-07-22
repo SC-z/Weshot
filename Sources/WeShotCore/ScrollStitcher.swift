@@ -321,14 +321,23 @@ public struct ScrollStitcher: Sendable {
         sampledRows: Int,
         sampledColumns: Int
     ) -> Double {
+        // ponytail: ignore only the top quarter of the overlap, where browser
+        // toolbars and sticky headers live; add configurable masks only if a
+        // concrete target needs something beyond this fixed-header case.
+        let ignoredTopRows = min(
+            overlap - 1,
+            Int((Double(overlap) * Self.maximumIgnoredTopOverlapFraction).rounded(.down))
+        )
+        let comparableRows = overlap - ignoredTopRows
+        let rowCount = min(comparableRows, sampledRows)
         var totalDifference: UInt64 = 0
         var channelCount: UInt64 = 0
 
-        for rowSample in 0 ..< sampledRows {
-            let row = Self.samplePosition(
+        for rowSample in 0 ..< rowCount {
+            let row = ignoredTopRows + Self.samplePosition(
                 sample: rowSample,
-                count: sampledRows,
-                extent: overlap
+                count: rowCount,
+                extent: comparableRows
             )
             let previousRow = previous.height - overlap + row
             let nextRow = row
@@ -363,6 +372,7 @@ public struct ScrollStitcher: Sendable {
     }
 
     private static let maximumVerifiedCandidates = 4
+    private static let maximumIgnoredTopOverlapFraction = 0.25
 
     private struct RGBAImage {
         let width: Int

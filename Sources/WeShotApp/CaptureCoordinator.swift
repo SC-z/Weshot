@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 @preconcurrency import ScreenCaptureKit
 import UniformTypeIdentifiers
+import WeShotCore
 
 struct ScreenSnapshot {
     let screen: NSScreen
@@ -94,20 +95,13 @@ enum DesktopCaptureService {
     }
 
     static func captureSelection(snapshot: ScreenSnapshot, localRect: CGRect, viewBounds: CGRect) async throws -> CGImage {
-        let displayBounds = CGDisplayBounds(snapshot.displayID)
         let rect = localRect.standardized.intersection(viewBounds)
         guard !rect.isNull, rect.width >= 1, rect.height >= 1 else {
             throw ScreenCaptureFailure.captureFailed("滚动截图选区无效")
         }
-        let captureRect = CGRect(
-            x: displayBounds.minX + rect.minX / viewBounds.width * displayBounds.width,
-            y: displayBounds.minY + (viewBounds.maxY - rect.maxY) / viewBounds.height * displayBounds.height,
-            width: rect.width / viewBounds.width * displayBounds.width,
-            height: rect.height / viewBounds.height * displayBounds.height
-        )
-        if #available(macOS 15.2, *) {
-            return try await capture(rect: captureRect)
-        }
+        // The rect-only screenshot API can return a stale image after the
+        // overlay yields focus on macOS 15.x. Bind every scrolling frame to
+        // its display, then crop the live display image instead.
         let full = try await captureDisplayFallback(displayID: snapshot.displayID, screen: snapshot.screen)
         let pixelRect = CGRect(
             x: rect.minX / viewBounds.width * CGFloat(full.width),
@@ -390,23 +384,25 @@ final class CaptureCoordinator: NSObject {
             size: selection.size
         )
         overlays.forEach { $0.window?.orderOut(nil) }
-        sourceApplication?.activate(options: [])
 
         let control = ScrollControlPanelController(near: globalSelection, on: window.screen)
         control.onFinish = { [weak self] in self?.finishScrollingCapture() }
         control.onCancel = { [weak self] in self?.cancelScrollingCapture() }
         scrollControl = control
-        if let initial = overlay.scrollFramesForCompletion.first {
-            scrollPreviewImage = initial
-            control.updatePreview(initial)
-        }
         control.showWindow(nil)
+        control.updateStatus("正在采集实时首帧…")
+        if let sourceApplication {
+            sourceApplication.activate()
+        } else {
+            NSApp.deactivate()
+        }
 
         let timer = Timer(timeInterval: 0.32, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.captureScrollFrameTick() }
         }
         scrollTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+        captureScrollFrameTick()
     }
 
     func captureScrollFrame(from overlay: OverlayWindowController, forwarding event: CGEvent?) {
@@ -442,6 +438,7 @@ final class CaptureCoordinator: NSObject {
                       self.scrollingOverlay === overlay
                 else { return }
                 if overlay.scrollCaptureDidFinish(image, error: nil) {
+                    self.scrollControl?.updateStatus("正在拼接第 \(overlay.scrollFrameCount) 帧…")
                     self.refreshScrollPreview(sessionID: sessionID, overlay: overlay)
                 }
             } catch {
@@ -450,6 +447,7 @@ final class CaptureCoordinator: NSObject {
                       self.scrollingOverlay === overlay
                 else { return }
                 overlay.scrollCaptureDidFinish(nil, error: error)
+                self.scrollControl?.updateStatus("采集失败")
             }
         }
         scrollCaptureTask = task
@@ -498,9 +496,14 @@ final class CaptureCoordinator: NSObject {
 
     private func refreshScrollPreview(sessionID: UUID, overlay: OverlayWindowController) {
         guard scrollPreviewTask == nil,
-              let current = scrollPreviewImage,
               let newest = overlay.scrollFramesForCompletion.last
         else { return }
+        guard let current = scrollPreviewImage else {
+            scrollPreviewImage = newest
+            scrollControl?.updatePreview(newest)
+            scrollControl?.updateStatus("首帧已就绪，开始滚动")
+            return
+        }
         let task = Task { @MainActor [weak self, weak overlay] in
             defer {
                 if self?.scrollSessionID == sessionID { self?.scrollPreviewTask = nil }
@@ -514,6 +517,7 @@ final class CaptureCoordinator: NSObject {
                 else { return }
                 self.scrollPreviewImage = result
                 self.scrollControl?.updatePreview(result)
+                self.scrollControl?.updateStatus("已拼接 \(overlay.scrollFrameCount) 帧")
             } catch {
                 guard let self, let overlay,
                       !Task.isCancelled,
@@ -521,7 +525,12 @@ final class CaptureCoordinator: NSObject {
                       self.scrollingOverlay === overlay
                 else { return }
                 overlay.discardLastScrollFrame()
+                if case ScrollStitcherError.noNewContent = error {
+                    self.scrollControl?.updateStatus("等待页面滚动…")
+                    return
+                }
                 overlay.showTransientMessage("本次滚动无法拼接，已保留当前预览")
+                self.scrollControl?.updateStatus("本帧无法拼接，继续滚动")
             }
         }
         scrollPreviewTask = task
