@@ -1,4 +1,5 @@
 .build/
+.codegraph/
 .swiftpm/
 DerivedData/
 build/
