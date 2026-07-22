@@ -76,6 +76,27 @@ struct ScrollStitcherRegressionTests {
         expectOverlapNotFound(for: [previous, next], using: stitcher)
     }
 
+    @Test("Default tolerance accepts a fixed browser toolbar")
+    func defaultToleranceAcceptsFixedBrowserToolbar() throws {
+        let width = 32
+        let height = 120
+        let toolbarHeight = 20
+        let scrollDistance = 30
+        let frame = { (offset: Int) in
+            makeImage(width: width, height: height) { x, y in
+                y < toolbarHeight
+                    ? (red: 255, green: 255, blue: 255)
+                    : self.patternPixel(x: x, y: y - toolbarHeight + offset)
+            }
+        }
+
+        let result = try ScrollStitcher().stitch([frame(0), frame(scrollDistance)])
+
+        #expect(result.overlaps.map(\.pixels) == [height - scrollDistance])
+        #expect(result.overlaps[0].meanAbsoluteError <= 8)
+        #expect(result.image.height == height + scrollDistance)
+    }
+
     private func expectNoNewContent(for frame: CGImage) {
         let stitcher = ScrollStitcher(
             configuration: .init(
@@ -121,9 +142,9 @@ struct ScrollStitcherRegressionTests {
 
     private func patternPixel(x: Int, y: Int) -> (red: UInt8, green: UInt8, blue: UInt8) {
         (
-            red: UInt8(y * 11 + x),
-            green: UInt8(y * 13 + x * 2),
-            blue: UInt8(y * 17 + x * 3)
+            red: UInt8((y * 11 + x) & 0xff),
+            green: UInt8((y * 13 + x * 2) & 0xff),
+            blue: UInt8((y * 17 + x * 3) & 0xff)
         )
     }
 

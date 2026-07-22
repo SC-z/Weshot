@@ -53,6 +53,8 @@ open build/WeShot.app
 
 ## 测试
 
+完整测试套件依赖 Xcode 提供的 Swift Testing；仅安装 Command Line Tools 时仍可构建应用，但无法运行这些测试。
+
 ```zsh
 ./scripts/test_all.sh
 ./scripts/test_system.sh
@@ -73,4 +75,3 @@ docs/                 测试报告和脱敏开发记录
 ```
 
 产品行为与验收标准见 [SPEC.md](SPEC.md)，贡献方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。本项目使用 [MIT License](LICENSE)。
-
