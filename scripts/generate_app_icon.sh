@@ -8,8 +8,8 @@ OUTPUT="$ROOT/build/AppIcon.icns"
 
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
-qlmanage -t -s 1024 -o "$ICONSET" "$SOURCE" >/dev/null
 RASTER="$ICONSET/${SOURCE:t}.png"
+swift "$ROOT/scripts/render_app_icon.swift" "$SOURCE" "$RASTER"
 
 for entry in \
     "16 icon_16x16.png" \

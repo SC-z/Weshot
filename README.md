@@ -4,7 +4,7 @@
 
 [English](README.en.md) · [更新日志](CHANGELOG.md) · [产品规范](SPEC.md)
 
-当前版本：**2.0.3（build 17）**。支持 **macOS 15.2+、Apple Silicon**。
+当前版本：**2.0.4（build 18）**。支持 **macOS 15.2+、Apple Silicon**。
 
 ## 使用
 

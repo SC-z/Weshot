@@ -1,5 +1,10 @@
 # Changelog / 更新日志
 
+## 2.0.4 - 2026-11-12
+
+- Preserve the app icon's transparent background when packaging.
+  打包时保留应用图标的透明背景，移除图标白边。
+
 ## 2.0.3 - 2026-11-12
 
 - Add a menu beside the translation icon to save separate target languages for Chinese and other source languages.

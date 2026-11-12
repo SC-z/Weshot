@@ -4,7 +4,7 @@ A native macOS screenshot app built with Swift and AppKit. Select a region, anno
 
 [简体中文](README.md) · [Changelog](CHANGELOG.md) · [Product specification](SPEC.md)
 
-Current version: **2.0.3 (build 17)**. Requires **macOS 15.2+ and Apple Silicon**.
+Current version: **2.0.4 (build 18)**. Requires **macOS 15.2+ and Apple Silicon**.
 
 ## Use
 
