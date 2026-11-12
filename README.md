@@ -1,13 +1,93 @@
 # WeShot
 
-Native, local-first screenshots for macOS.
+原生 macOS 截图工具，使用 Swift 与 AppKit 构建。通过菜单栏或快捷键完成框选、标注、翻译、长截图、保存和钉图。
 
-[简体中文](README.zh-CN.md) · [English](README.en.md)
+[English](README.en.md) · [更新日志](CHANGELOG.md) · [产品规范](SPEC.md)
 
-## Quick links
+当前版本：**2.0.3（build 17）**。支持 **macOS 15.2+、Apple Silicon**。
 
-- [Product specification](SPEC.md)
-- [Changelog](CHANGELOG.md)
-- [Contributing](CONTRIBUTING.md)
-- [Contributors](CONTRIBUTORS.md)
-- [MIT License](LICENSE)
+## 使用
+
+打开 DMG，将 `WeShot.app` 拖入“Applications”，然后从“应用程序”启动。
+
+1. 按默认快捷键 `⌃⌘A`，或选择菜单栏中的“截取屏幕”。快捷键可在菜单栏修改。
+2. 拖动建立选区，移动选区或拖动八个控制点调整大小。
+3. 使用工具栏标注、翻译、滚动截图、保存或钉图。
+4. 按 `Return` 完成并复制，按 `Esc` 取消；编辑文字时，`Esc` 只取消当前草稿。
+
+| 功能 | 行为 |
+|---|---|
+| 框选与取色 | 自由框选、多显示器、像素放大镜、RGB/HEX 取色；按 `C` 复制 HEX |
+| 标注 | 矩形、椭圆、箭头、画笔、文字、Unicode 表情和马赛克；`⌘Z` 撤销 |
+| 翻译 | 点击图标翻译选区。点击旁边的箭头可分别设置其他语言和中文的目标语言，默认为简体中文和英语 |
+| 隐私打码 | 马赛克面板提供本地人脸、姓名、手机号和邮箱检测 |
+| 长截图 | 只采集选区，滚动时更新预览；完成后直接复制退出 |
+| 输出与钉图 | 保存 PNG、复制 PNG/TIFF；钉图可拖动、围绕鼠标位置滚轮缩放，双击关闭 |
+
+长截图无法可靠对齐时会保留当前结果，提示回到中断位置继续。单次最多 40 帧或约 256 MiB 原始像素；动态页面、重复内容和较大固定区域可能无法拼接。
+
+WeShot 不是微信截图的 1:1 实现。当前没有独立 OCR 结果窗口、系统分享、二维码或在线 AI 入口。
+
+## 屏幕录制权限
+
+首次截图时，在“系统设置 → 隐私与安全性 → 屏幕与系统音频录制”中允许 WeShot，并按系统提示重新打开应用。
+
+更新时保持安装位置和签名身份一致。从旧临时签名版本迁移到固定签名版本，可能需要授权一次。如果开关已开启仍被拒绝，先确认运行的是“Applications”中的当前副本；旧授权条目仍失配时，只移除 WeShot 的旧条目，再添加当前应用。无需重置其他应用权限。
+
+后台终端或自动化工具启动的权限检查，可能被系统归属到启动工具；它的结果不一定代表正常启动的 WeShot。
+
+## 本地构建
+
+需要 Swift 6.1 或兼容工具链。在仓库目录执行：
+
+```zsh
+WESHOT_SIGNING_IDENTITY=- WESHOT_ALLOW_ADHOC=1 ./scripts/build_app.sh
+open build/WeShot.app
+```
+
+这是无需维护者私钥的本地测试方式。临时签名构建在更新后可能需要重新授权，不用于正式更新包。
+
+### 固定签名与 DMG
+
+维护者机器的构建脚本默认使用 `Resources/WeShotSigning.cer` 固定的公开证书，查找钥匙串中匹配的私钥，并在签名后核验。后续更新继续使用同一身份，缺少私钥时失败，不会自动创建替代证书或退回临时签名。
+
+```zsh
+./scripts/build_app.sh release
+./scripts/build_dmg.sh
+```
+
+产物在 `build/`：应用、版本化 DMG 和 SHA-256 校验文件。DMG 脚本拒绝临时签名应用，也不会覆盖已存在的同版本包；再次发布前应更新版本号和构建号。
+
+- **公开证书 `.cer` 可以提交**：它包含公钥、用途和有效期，不包含私钥。公开证书不能用于代替维护者签署更新。
+- **私钥、含私钥的 `.p12/.pfx`、导出密码不能提交**。本项目私钥保存在维护者的登录钥匙串中；换机前通过钥匙串访问安全备份签名身份。
+- 本地固定签名不等于 Apple Developer ID 签名或公证，也不保证其他 Mac 的首次安装信任。
+
+## 隐私
+
+截图和标注在本机处理；完成操作写入系统剪贴板，保存操作写出 PNG。文字识别和隐私检测使用 macOS Vision；翻译使用 macOS Translation，首次使用时系统可能下载语言包。应用不接入第三方截图、识别或翻译服务。
+
+## 验证
+
+测试需要提供 `Testing` 模块的 Swift 工具链，例如完整 Xcode。
+
+```zsh
+./scripts/test_all.sh
+./scripts/test_system.sh
+```
+
+- `test_all.sh`：Swift 测试、严格 Release 构建、签名、自测和离屏渲染。
+- `test_system.sh`：在未锁屏、权限有效的图形会话中检查真实捕获、长图、可见界面、输出、快捷键和翻译。该脚本会在 `work/` 写入测试图像，请勿提交这些文件。
+
+已有验证结果与限制见 [测试报告](docs/TEST_REPORT.md)。完整测试套件与局部断言检查在报告中分别记录，不互相替代。
+
+## 项目结构
+
+```text
+Sources/WeShotApp/    AppKit 界面、捕获、快捷键和系统服务
+Sources/WeShotCore/   几何、渲染、识别、隐私检测和长图拼接
+Tests/               核心与应用回归测试
+Resources/           应用配置、图标源文件和公开签名证书
+scripts/             构建、打包和测试
+```
+
+参与开发请阅读 [贡献指南](CONTRIBUTING.md)。本项目使用 [MIT License](LICENSE)。

@@ -13,3 +13,9 @@ xcuserdata/
 .env
 .env.*
 .DS_Store
+
+# Signing secrets; the public Resources/WeShotSigning.cer is intentionally tracked.
+*.key
+*.pem
+*.p12
+*.pfx

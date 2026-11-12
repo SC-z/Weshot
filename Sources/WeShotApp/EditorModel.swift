@@ -225,6 +225,7 @@ struct ToolbarLayout {
     static let separatorWidth: CGFloat = 18
     static let height: CGFloat = 48
     static let gap: CGFloat = 16
+    static let translationOptionsWidth: CGFloat = 18
     static let items: [ToolbarItem] = [
         .tool(.rectangle), .tool(.ellipse), .tool(.emoji), .tool(.arrow), .tool(.pen), .tool(.mosaic), .tool(.text),
         .action(.translate), .action(.scroll),
@@ -293,11 +294,12 @@ struct StylePaletteLayout {
 }
 
 final class CaptureEditorState {
-    var selection: CGRect?
+    var selection: CGRect? { didSet { toolbarDidChange?() } }
     var tool: CaptureTool = .selection
     var style = EditorStyle()
     var annotations: [AppAnnotation] = []
-    var scrolling = false
+    var scrolling = false { didSet { toolbarDidChange?() } }
+    var toolbarDidChange: (() -> Void)?
     var transientMessage: String?
     var canUndo: Bool { !annotations.isEmpty }
 
@@ -358,6 +360,11 @@ enum ImageComposer {
             drawArrow(from: start, to: end, color: color, width: width)
         case .pen(let points, let color, let width):
             guard let first = points.first else { return }
+            if points.count == 1 {
+                color.setFill()
+                NSBezierPath(ovalIn: CGRect(x: first.x - width / 2, y: first.y - width / 2, width: width, height: width)).fill()
+                return
+            }
             color.setStroke()
             let path = NSBezierPath()
             path.lineCapStyle = .round

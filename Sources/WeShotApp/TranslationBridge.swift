@@ -4,6 +4,33 @@ import NaturalLanguage
 import SwiftUI
 @preconcurrency import Translation
 
+enum TranslationSource: String, CaseIterable {
+    case other, chinese
+
+    var menuTitle: String { self == .chinese ? "中文译成" : "其他语言译成" }
+    var defaultTarget: Locale.Language {
+        Locale.Language(identifier: self == .chinese ? "en" : "zh-Hans")
+    }
+
+    private var preferenceKey: String { "translationTarget.\(rawValue)" }
+
+    func target(in defaults: UserDefaults = .standard) -> Locale.Language {
+        defaults.string(forKey: preferenceKey).map(Locale.Language.init(identifier:)) ?? defaultTarget
+    }
+
+    func setTarget(_ language: Locale.Language, in defaults: UserDefaults = .standard) {
+        defaults.set(language.minimalIdentifier, forKey: preferenceKey)
+    }
+
+    static func displayName(for language: Locale.Language) -> String {
+        if language.languageCode?.identifier == "zh" {
+            return language.maximalIdentifier.hasPrefix("zh-Hant") ? "繁体中文" : "简体中文"
+        }
+        let identifier = language.minimalIdentifier
+        return Locale(identifier: "zh-Hans").localizedString(forIdentifier: identifier) ?? identifier
+    }
+}
+
 /// AppKit cannot initialize TranslationSession directly. WeShot mounts an
 /// invisible NSHostingView into the active capture overlay so SwiftUI can vend
 /// the session without opening a separate translation window.
@@ -38,7 +65,16 @@ final class SystemTranslationController: TranslationController {
         )
 
         let requestID = UUID()
-        let pair = Self.languagePair(for: source)
+        let pair = Self.languagePair(
+            for: source,
+            otherTarget: TranslationSource.other.target(),
+            chineseTarget: TranslationSource.chinese.target()
+        )
+        if pair.source?.minimalIdentifier == pair.target.minimalIdentifier {
+            return TranslationResult(
+                sourceText: source, translatedText: nil, statusMessage: "原文已是目标语言"
+            )
+        }
         let configuration = TranslationSession.Configuration(
             source: pair.source,
             target: pair.target
@@ -124,15 +160,22 @@ final class SystemTranslationController: TranslationController {
         fallbackHostWindow = window
     }
 
+    static func supportedLanguages() async -> [Locale.Language] {
+        await LanguageAvailability().supportedLanguages
+    }
+
     static func languagePair(
-        for text: String
+        for text: String,
+        otherTarget: Locale.Language = TranslationSource.other.defaultTarget,
+        chineseTarget: Locale.Language = TranslationSource.chinese.defaultTarget
     ) -> (source: Locale.Language?, target: Locale.Language) {
         let code = NLLanguageRecognizer.dominantLanguage(for: text)?.rawValue
         let containsHan = text.range(of: #"\p{Han}"#, options: .regularExpression) != nil
-        let isChinese = code?.lowercased().hasPrefix("zh") == true || containsHan
+        // Japanese and Korean can contain Han characters without being Chinese.
+        let isChinese = code?.hasPrefix("zh") == true || (containsHan && code != "ja" && code != "ko")
         let sourceIdentifier = isChinese ? (code?.lowercased().hasPrefix("zh") == true ? code : "zh-Hans") : code
         let source = sourceIdentifier.map { Locale.Language(identifier: $0) }
-        let target = Locale.Language(identifier: isChinese ? "en" : "zh-Hans")
+        let target = isChinese ? chineseTarget : otherTarget
         return (source, target)
     }
 }

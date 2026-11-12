@@ -12,7 +12,7 @@ swift test "${SWIFT_FLAGS[@]}"
 swift build "${SWIFT_FLAGS[@]}" -c release --product WeShot \
     -Xswiftc -warn-concurrency \
     -Xswiftc -warnings-as-errors
-"$ROOT/scripts/build_app.sh" release
+WESHOT_ALLOW_ADHOC=1 "$ROOT/scripts/build_app.sh" release
 test -s "$ROOT/build/WeShot.app/Contents/Resources/AppIcon.icns"
 [[ "$(plutil -extract CFBundleIconFile raw "$ROOT/build/WeShot.app/Contents/Info.plist")" == "AppIcon" ]]
 if strings "$ROOT/build/WeShot.app/Contents/MacOS/WeShot" |

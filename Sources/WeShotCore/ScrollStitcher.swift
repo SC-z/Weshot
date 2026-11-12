@@ -41,7 +41,7 @@ public enum ScrollStitcherError: Error, Equatable, LocalizedError, Sendable {
 
 public struct ScrollOverlap: Equatable, Sendable {
     public let pixels: Int
-    /// Mean absolute RGB channel error in the range `0 ... 255`.
+    /// Maximum of whole-region and content-edge mean RGB error, in `0 ... 255`.
     public let meanAbsoluteError: Double
 
     public init(pixels: Int, meanAbsoluteError: Double) {
@@ -106,7 +106,28 @@ public struct ScrollStitcher: Sendable {
         }
         let first = try Self.rgbaImage(from: previous, frameIndex: 0)
         let second = try Self.rgbaImage(from: next, frameIndex: 1)
-        return try estimateOverlap(first, second, frameIndex: 1)
+        return try estimateOverlap(first, second, frameIndex: 1, fixedRows: Self.fixedRows(first, second))
+    }
+
+    /// Appends one viewport using the last accepted viewport for alignment.
+    public func append(_ next: CGImage, to image: CGImage, previous: CGImage) throws -> ScrollStitchResult {
+        try validateConfiguration()
+        for frame in [previous, next] where frame.width != image.width {
+            throw ScrollStitcherError.widthMismatch(frameIndex: 1, expected: image.width, actual: frame.width)
+        }
+        guard image.height >= previous.height else {
+            throw ScrollStitcherError.invalidConfiguration("累计图高度小于上一张原始截图。")
+        }
+        let output = try Self.rgbaImage(from: image, frameIndex: 0)
+        let first = image === previous ? output : try Self.rgbaImage(from: previous, frameIndex: 0)
+        let second = try Self.rgbaImage(from: next, frameIndex: 1)
+        var pixels = output.pixels
+        var height = output.height
+        let overlap = try appendRows(first, second, frameIndex: 1, pixels: &pixels, totalHeight: &height)
+        guard let result = Self.makeImage(pixels: pixels, width: image.width, height: height) else {
+            throw ScrollStitcherError.outputCreationFailed
+        }
+        return ScrollStitchResult(image: result, overlaps: [overlap])
     }
 
     public func stitch(_ frames: [CGImage]) throws -> ScrollStitchResult {
@@ -130,27 +151,14 @@ public struct ScrollStitcher: Sendable {
         var pixels = converted[0].pixels
         var totalHeight = converted[0].height
         var overlaps: [ScrollOverlap] = []
-        let rowBytes = try Self.rowByteCount(width: expectedWidth)
-
         for index in 1 ..< converted.count {
-            let overlap = try estimateOverlap(
+            let overlap = try appendRows(
                 converted[index - 1],
                 converted[index],
-                frameIndex: index
+                frameIndex: index,
+                pixels: &pixels,
+                totalHeight: &totalHeight
             )
-            guard overlap.pixels < converted[index].height else {
-                throw ScrollStitcherError.noNewContent(frameIndex: index)
-            }
-
-            let addedRows = converted[index].height - overlap.pixels
-            let (newHeight, heightOverflow) = totalHeight.addingReportingOverflow(addedRows)
-            guard !heightOverflow else { throw ScrollStitcherError.outputTooLarge }
-            let (_, byteOverflow) = newHeight.multipliedReportingOverflow(by: rowBytes)
-            guard !byteOverflow else { throw ScrollStitcherError.outputTooLarge }
-
-            let appendOffset = overlap.pixels * rowBytes
-            pixels.append(contentsOf: converted[index].pixels[appendOffset...])
-            totalHeight = newHeight
             overlaps.append(overlap)
         }
 
@@ -162,6 +170,29 @@ public struct ScrollStitcher: Sendable {
             throw ScrollStitcherError.outputCreationFailed
         }
         return ScrollStitchResult(image: image, overlaps: overlaps)
+    }
+
+    private func appendRows(
+        _ previous: RGBAImage, _ next: RGBAImage, frameIndex: Int,
+        pixels: inout [UInt8], totalHeight: inout Int
+    ) throws -> ScrollOverlap {
+        let fixedRows = Self.fixedRows(previous, next)
+        let overlap = try estimateOverlap(previous, next, frameIndex: frameIndex, fixedRows: fixedRows)
+        guard overlap.pixels < next.height else {
+            throw ScrollStitcherError.noNewContent(frameIndex: frameIndex)
+        }
+        let rowBytes = try Self.rowByteCount(width: previous.width)
+        let (newHeight, heightOverflow) = totalHeight.addingReportingOverflow(next.height - overlap.pixels)
+        guard !heightOverflow else { throw ScrollStitcherError.outputTooLarge }
+        let (_, byteOverflow) = newHeight.multipliedReportingOverflow(by: rowBytes)
+        guard !byteOverflow else { throw ScrollStitcherError.outputTooLarge }
+
+        // Replace the old fixed footer with newly revealed content and the final footer.
+        pixels.removeLast(fixedRows.bottom * rowBytes)
+        let appendOffset = (overlap.pixels - fixedRows.bottom) * rowBytes
+        pixels.append(contentsOf: next.pixels[appendOffset...])
+        totalHeight = newHeight
+        return overlap
     }
 
     private func validateConfiguration() throws {
@@ -188,7 +219,8 @@ public struct ScrollStitcher: Sendable {
     private func estimateOverlap(
         _ previous: RGBAImage,
         _ next: RGBAImage,
-        frameIndex: Int
+        frameIndex: Int,
+        fixedRows: (top: Int, bottom: Int)
     ) throws -> ScrollOverlap {
         let maximum = min(
             min(previous.height, next.height),
@@ -219,7 +251,8 @@ public struct ScrollStitcher: Sendable {
                     meanAbsoluteError: sampledMeanAbsoluteError(
                         previous,
                         next,
-                        overlap: overlap
+                        overlap: overlap,
+                        fixedRows: fixedRows
                     )
                 )
             )
@@ -253,7 +286,8 @@ public struct ScrollStitcher: Sendable {
                     meanAbsoluteError: fullMeanAbsoluteError(
                         previous,
                         next,
-                        overlap: candidate.pixels
+                        overlap: candidate.pixels,
+                        fixedRows: fixedRows
                     )
                 )
             }
@@ -273,7 +307,8 @@ public struct ScrollStitcher: Sendable {
             )
         }
         if let equallyGood = verifiedCandidates.dropFirst().first(where: {
-            abs($0.meanAbsoluteError - best.meanAbsoluteError) <= 1e-9
+            // One 8-bit channel level is insufficient evidence to choose an alignment.
+            $0.meanAbsoluteError - best.meanAbsoluteError <= 1
         }) {
             throw ScrollStitcherError.ambiguousOverlap(
                 frameIndex: frameIndex,
@@ -287,7 +322,8 @@ public struct ScrollStitcher: Sendable {
     private func sampledMeanAbsoluteError(
         _ previous: RGBAImage,
         _ next: RGBAImage,
-        overlap: Int
+        overlap: Int,
+        fixedRows: (top: Int, bottom: Int)
     ) -> Double {
         let sampledRows = min(overlap, configuration.sampledRowsPerCandidate)
         let sampledColumns = min(previous.width, configuration.sampledColumns)
@@ -296,21 +332,24 @@ public struct ScrollStitcher: Sendable {
             next,
             overlap: overlap,
             sampledRows: sampledRows,
-            sampledColumns: sampledColumns
+            sampledColumns: sampledColumns,
+            fixedRows: fixedRows
         )
     }
 
     private func fullMeanAbsoluteError(
         _ previous: RGBAImage,
         _ next: RGBAImage,
-        overlap: Int
+        overlap: Int,
+        fixedRows: (top: Int, bottom: Int)
     ) -> Double {
         meanAbsoluteError(
             previous,
             next,
             overlap: overlap,
             sampledRows: overlap,
-            sampledColumns: previous.width
+            sampledColumns: previous.width,
+            fixedRows: fixedRows
         )
     }
 
@@ -319,22 +358,19 @@ public struct ScrollStitcher: Sendable {
         _ next: RGBAImage,
         overlap: Int,
         sampledRows: Int,
-        sampledColumns: Int
+        sampledColumns: Int,
+        fixedRows: (top: Int, bottom: Int)
     ) -> Double {
-        // ponytail: ignore only the top quarter of the overlap, where browser
-        // toolbars and sticky headers live; add configurable masks only if a
-        // concrete target needs something beyond this fixed-header case.
-        let ignoredTopRows = min(
-            overlap - 1,
-            Int((Double(overlap) * Self.maximumIgnoredTopOverlapFraction).rounded(.down))
-        )
-        let comparableRows = overlap - ignoredTopRows
+        let comparableRows = overlap - fixedRows.top - fixedRows.bottom
+        guard comparableRows > 0 else { return .infinity }
         let rowCount = min(comparableRows, sampledRows)
         var totalDifference: UInt64 = 0
         var channelCount: UInt64 = 0
+        var edgeDifference: UInt64 = 0
+        var edgeChannelCount: UInt64 = 0
 
         for rowSample in 0 ..< rowCount {
-            let row = ignoredTopRows + Self.samplePosition(
+            let row = fixedRows.top + Self.samplePosition(
                 sample: rowSample,
                 count: rowCount,
                 extent: comparableRows
@@ -351,19 +387,52 @@ public struct ScrollStitcher: Sendable {
                 let previousOffset = (previousRow * previous.width + column) * 4
                 let nextOffset = (nextRow * next.width + column) * 4
 
+                let previousLeft = previousOffset - (column > 0 ? 4 : 0)
+                let nextLeft = nextOffset - (column > 0 ? 4 : 0)
+                let previousAbove = previousOffset - (previousRow > 0 ? previous.width * 4 : 0)
+                let nextAbove = nextOffset - (nextRow > 0 ? next.width * 4 : 0)
+                var difference: UInt64 = 0
+                var isEdge = false
                 for channel in 0 ..< 3 {
-                    totalDifference += UInt64(
-                        abs(
-                            Int(previous.pixels[previousOffset + channel])
-                                - Int(next.pixels[nextOffset + channel])
-                        )
-                    )
-                    channelCount += 1
+                    let first = Int(previous.pixels[previousOffset + channel])
+                    let second = Int(next.pixels[nextOffset + channel])
+                    difference += UInt64(abs(first - second))
+                    if !isEdge {
+                        isEdge = abs(first - Int(previous.pixels[previousLeft + channel])) > 8
+                            || abs(second - Int(next.pixels[nextLeft + channel])) > 8
+                            || abs(first - Int(previous.pixels[previousAbove + channel])) > 8
+                            || abs(second - Int(next.pixels[nextAbove + channel])) > 8
+                    }
+                }
+                totalDifference += difference
+                channelCount += 3
+                // White margins cannot dilute disagreement between text or other content edges.
+                if isEdge {
+                    edgeDifference += difference
+                    edgeChannelCount += 3
                 }
             }
         }
 
-        return channelCount == 0 ? .infinity : Double(totalDifference) / Double(channelCount)
+        let mean = channelCount == 0 ? .infinity : Double(totalDifference) / Double(channelCount)
+        let edgeMean = edgeChannelCount == 0 ? mean : Double(edgeDifference) / Double(edgeChannelCount)
+        return max(mean, edgeMean)
+    }
+
+    private static func fixedRows(_ previous: RGBAImage, _ next: RGBAImage) -> (top: Int, bottom: Int) {
+        guard previous.height == next.height else { return (0, 0) }
+        let rowBytes = previous.width * 4
+        // shortcut: detect unchanged edges within a quarter viewport, revisit for larger sticky panels.
+        let limit = previous.height / 4
+        func matches(_ row: Int) -> Bool {
+            let range = row * rowBytes ..< (row + 1) * rowBytes
+            return previous.pixels[range] == next.pixels[range]
+        }
+        var top = 0
+        while top < limit, matches(top) { top += 1 }
+        var bottom = 0
+        while bottom < limit, matches(previous.height - bottom - 1) { bottom += 1 }
+        return (top, bottom)
     }
 
     private static func samplePosition(sample: Int, count: Int, extent: Int) -> Int {
@@ -372,7 +441,6 @@ public struct ScrollStitcher: Sendable {
     }
 
     private static let maximumVerifiedCandidates = 4
-    private static let maximumIgnoredTopOverlapFraction = 0.25
 
     private struct RGBAImage {
         let width: Int

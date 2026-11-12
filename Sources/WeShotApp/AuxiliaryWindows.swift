@@ -25,11 +25,11 @@ final class PermissionWindowController: NSWindowController {
         title.font = .systemFont(ofSize: 18, weight: .semibold)
         title.alignment = .center
 
-        let detail = NSTextField(wrappingLabelWithString: "WeShot 只在你发起截图时读取屏幕，截图在内存中处理；除非你主动保存，否则不会写入磁盘。请在系统设置中启用 WeShot，然后返回重新检测。")
+        let detail = NSTextField(wrappingLabelWithString: "请在系统设置中启用 WeShot，并运行“应用程序”中的副本。若已经开启仍提示，请退出并重新打开 WeShot；旧版本或其他副本的授权可能不适用于当前版本。截图只在你发起操作时读取。")
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = .secondaryLabelColor
         detail.alignment = .center
-        detail.maximumNumberOfLines = 4
+        detail.maximumNumberOfLines = 5
 
         let settings = NSButton(title: "打开系统设置", target: self, action: #selector(openSettings))
         settings.bezelStyle = .rounded
@@ -265,15 +265,16 @@ final class PinImageView: NSImageView {
         let scale = min(max(requestedScale, minimumScale), maximumScale)
         guard abs(scale - 1) > 0.001 else { return }
 
-        let size = CGSize(width: frame.width * scale, height: frame.height * scale)
-        window.setFrame(
-            CGRect(
-                x: frame.midX - size.width / 2,
-                y: frame.midY - size.height / 2,
-                width: size.width,
-                height: size.height
-            ),
-            display: true
+        let anchor = window.convertPoint(toScreen: event.locationInWindow)
+        window.setFrame(Self.scaledFrame(frame, scale: scale, anchor: anchor), display: true)
+    }
+
+    static func scaledFrame(_ frame: CGRect, scale: CGFloat, anchor: CGPoint) -> CGRect {
+        CGRect(
+            x: anchor.x + (frame.minX - anchor.x) * scale,
+            y: anchor.y + (frame.minY - anchor.y) * scale,
+            width: frame.width * scale,
+            height: frame.height * scale
         )
     }
 

@@ -40,6 +40,16 @@ enum CoreServiceBridge {
         }.value
         return output.image
     }
+
+    static func appendScrollFrame(_ next: CGImage, to image: CGImage, previous: CGImage) async throws -> CGImage {
+        let next = SendableCGImage(next)
+        let image = SendableCGImage(image)
+        let previous = SendableCGImage(previous)
+        let output = try await Task.detached(priority: .userInitiated) {
+            SendableCGImage(try ScrollStitcher().append(next.image, to: image.image, previous: previous.image).image)
+        }.value
+        return output.image
+    }
 }
 
 /// CGImage is immutable, but older SDK overlays do not consistently annotate

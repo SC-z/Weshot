@@ -155,6 +155,8 @@ struct AppEditorIntegrationTests {
         #expect(text == "Translated text")
         let after = try #require(view.composedImage())
         #expect(before.dataProvider?.data != after.dataProvider?.data)
+        let translationInput = try #require(view.composedImage(excludingTranslation: true))
+        #expect(before.dataProvider?.data == translationInput.dataProvider?.data)
         view.state.undo()
         #expect(view.state.annotations.isEmpty)
         controller.close()
@@ -199,6 +201,23 @@ struct AppEditorIntegrationTests {
         let english = SystemTranslationController.languagePair(for: "Hello")
         #expect(chinese.target == Locale.Language(identifier: "en"))
         #expect(english.target == Locale.Language(identifier: "zh-Hans"))
+    }
+
+    @Test("Translation targets are saved separately and used by their source routes")
+    func customTranslationTargets() throws {
+        let suite = "WeShotTranslationTest.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        TranslationSource.other.setTarget(Locale.Language(identifier: "fr"), in: defaults)
+        #expect(TranslationSource.chinese.target(in: defaults).minimalIdentifier == "en")
+        TranslationSource.chinese.setTarget(Locale.Language(identifier: "ja"), in: defaults)
+
+        let other = TranslationSource.other.target(in: defaults)
+        let chinese = TranslationSource.chinese.target(in: defaults)
+        #expect(SystemTranslationController.languagePair(for: "Hello", otherTarget: other, chineseTarget: chinese).target.minimalIdentifier == "fr")
+        #expect(SystemTranslationController.languagePair(for: "你好", otherTarget: other, chineseTarget: chinese).target.minimalIdentifier == "ja")
+        #expect(SystemTranslationController.languagePair(for: "日本語を翻訳します。", otherTarget: other, chineseTarget: chinese).target.minimalIdentifier == "fr")
     }
 
     @Test("Custom hotkey validates, displays, and persists")

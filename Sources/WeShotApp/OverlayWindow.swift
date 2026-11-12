@@ -32,7 +32,9 @@ final class OverlayWindowController: NSWindowController {
 
     func configureFixtureSelection() { overlayView.configureFixtureSelection() }
     func deactivateSelection() { overlayView.deactivateSelection() }
-    func composedImage() -> CGImage? { overlayView.composedImage() }
+    func composedImage(excludingTranslation: Bool = false) -> CGImage? {
+        overlayView.composedImage(excludingTranslation: excludingTranslation)
+    }
     func showTransientMessage(_ message: String) { overlayView.showTransientMessage(message) }
     func addPrivacyMosaics(_ rects: [CGRect]) { overlayView.addPrivacyMosaics(rects) }
     func setTranslationOverlay(_ text: String) { overlayView.setTranslationOverlay(text) }
@@ -95,6 +97,7 @@ final class OverlayView: NSView, NSTextFieldDelegate {
     private var isCapturingScrollFrame = false
     private var scrollCapturedBytes = 0
     private var scrollFrameLimitReached = false
+    private let translationOptionsButton = NSButton()
 
     private static let maximumScrollFrames = 40
     private static let maximumScrollBytes = 256 * 1_024 * 1_024
@@ -116,6 +119,31 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         super.init(frame: frameRect)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
+        translationOptionsButton.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "翻译方向")?
+            .withSymbolConfiguration(.init(pointSize: 8, weight: .semibold))
+        translationOptionsButton.isBordered = false
+        translationOptionsButton.imagePosition = .imageOnly
+        translationOptionsButton.contentTintColor = toolbarInk
+        translationOptionsButton.toolTip = "翻译方向"
+        translationOptionsButton.setAccessibilityLabel("翻译方向")
+        translationOptionsButton.target = self
+        translationOptionsButton.action = #selector(showTranslationDirections)
+        translationOptionsButton.isHidden = true
+        addSubview(translationOptionsButton)
+        state.toolbarDidChange = { [weak self] in self?.needsLayout = true }
+    }
+
+    override func layout() {
+        super.layout()
+        guard let selection = state.selection, !state.scrolling,
+              let item = ToolbarLayout.frame(for: .translate, toolbarFrame: ToolbarLayout.frame(for: selection, in: bounds))
+        else {
+            translationOptionsButton.isHidden = true
+            return
+        }
+        let width = ToolbarLayout.translationOptionsWidth
+        translationOptionsButton.frame = CGRect(x: item.maxX - width, y: item.minY, width: width, height: item.height)
+        translationOptionsButton.isHidden = false
     }
 
     @available(*, unavailable)
@@ -260,7 +288,11 @@ final class OverlayView: NSView, NSTextFieldDelegate {
             } else {
                 tint = toolbarInk
             }
-            drawSymbol(item.symbolName, in: itemFrame, tint: tint, accessibilityName: item.accessibilityName)
+            var symbolFrame = itemFrame
+            if item == .action(.translate) {
+                symbolFrame.size.width -= ToolbarLayout.translationOptionsWidth
+            }
+            drawSymbol(item.symbolName, in: symbolFrame, tint: tint, accessibilityName: item.accessibilityName)
             if let separatorFrame = ToolbarLayout.separatorFrame(after: index, toolbarFrame: frame) {
                 NSColor(calibratedWhite: 0.88, alpha: 1).setStroke()
                 let separator = NSBezierPath()
@@ -738,6 +770,49 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
+    @objc private func showTranslationDirections() {
+        Task { @MainActor [weak self] in
+            let languages = await SystemTranslationController.supportedLanguages()
+            guard let self, self.window?.isVisible == true, self.state.selection != nil, !self.state.scrolling else { return }
+            if languages.isEmpty {
+                self.showTransientMessage("系统未返回可选的翻译语言")
+                return
+            }
+            let choices = languages.sorted {
+                TranslationSource.displayName(for: $0).localizedStandardCompare(TranslationSource.displayName(for: $1)) == .orderedAscending
+            }
+            let menu = NSMenu()
+            for source in TranslationSource.allCases {
+                let target = source.target()
+                let section = NSMenuItem(
+                    title: "\(source.menuTitle) · \(TranslationSource.displayName(for: target))",
+                    action: nil, keyEquivalent: ""
+                )
+                let submenu = NSMenu()
+                for language in choices {
+                    let item = NSMenuItem(
+                        title: TranslationSource.displayName(for: language),
+                        action: #selector(selectTranslationTarget(_:)), keyEquivalent: ""
+                    )
+                    item.target = self
+                    item.representedObject = (source, language)
+                    item.state = language.minimalIdentifier == target.minimalIdentifier ? .on : .off
+                    submenu.addItem(item)
+                }
+                section.submenu = submenu
+                menu.addItem(section)
+            }
+            let frame = self.translationOptionsButton.frame
+            menu.popUp(positioning: nil, at: CGPoint(x: frame.minX, y: frame.minY), in: self)
+        }
+    }
+
+    @objc private func selectTranslationTarget(_ item: NSMenuItem) {
+        guard let (source, language) = item.representedObject as? (TranslationSource, Locale.Language) else { return }
+        source.setTarget(language)
+        showTransientMessage("\(source.menuTitle)\(TranslationSource.displayName(for: language))")
+    }
+
     private func handleStylePaletteClick(_ point: CGPoint, toolbar: CGRect) -> Bool {
         let palette = stylePaletteFrame(near: toolbar)
         guard palette.contains(point) else { return false }
@@ -808,7 +883,10 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         case .rectangle: annotation = .rectangle(CGRect.from(start, clippedEnd), state.style.color, state.style.lineWidth)
         case .ellipse: annotation = .ellipse(CGRect.from(start, clippedEnd), state.style.color, state.style.lineWidth)
         case .arrow: annotation = .arrow(start, clippedEnd, state.style.color, state.style.lineWidth)
-        case .pen: annotation = points.count > 1 ? .pen(points.map { boundedToSelection($0) }, state.style.color, state.style.lineWidth) : nil
+        case .pen:
+            var stroke = points.map { boundedToSelection($0) }
+            if stroke.last != clippedEnd { stroke.append(clippedEnd) }
+            annotation = .pen(stroke, state.style.color, state.style.lineWidth)
         case .mosaic: annotation = .mosaic(CGRect.from(start, clippedEnd), state.style.mosaicBlockSize)
         default: annotation = nil
         }
@@ -839,23 +917,33 @@ final class OverlayView: NSView, NSTextFieldDelegate {
 
     @objc private func commitTextFromField(_ sender: NSTextField) { commitTextEditing() }
 
-    func controlTextDidEndEditing(_ obj: Notification) { commitTextEditing() }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === textField, commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        cancelTextEditing()
+        return true
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, field === textField else { return }
+        commitTextEditing()
+    }
 
     private func commitTextEditing() {
         guard let field = textField else { return }
+        textField = nil
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty {
             state.annotations.append(.text(textOrigin, text, state.style.color, max(14, state.style.lineWidth * 5)))
         }
         field.removeFromSuperview()
-        textField = nil
         window?.makeFirstResponder(self)
         needsDisplay = true
     }
 
     private func cancelTextEditing() {
-        textField?.removeFromSuperview()
+        guard let field = textField else { return }
         textField = nil
+        field.removeFromSuperview()
         window?.makeFirstResponder(self)
         needsDisplay = true
     }
@@ -941,6 +1029,7 @@ final class OverlayView: NSView, NSTextFieldDelegate {
     }
 
     func deactivateSelection() {
+        cancelTextEditing()
         stitchedImage = nil
         state.selection = nil
         state.annotations.removeAll()
@@ -948,17 +1037,21 @@ final class OverlayView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    func composedImage() -> CGImage? {
+    func composedImage(excludingTranslation: Bool = false) -> CGImage? {
         guard let selection = state.selection else { return nil }
+        let annotations = state.annotations.filter {
+            if excludingTranslation, case .translation = $0 { return false }
+            return true
+        }
         if let stitchedImage {
             return ImageComposer.compose(
                 base: stitchedImage,
                 viewBounds: selection,
                 selection: selection,
-                annotations: state.annotations
+                annotations: annotations
             )
         }
-        return ImageComposer.compose(base: snapshot.image, viewBounds: bounds, selection: selection, annotations: state.annotations)
+        return ImageComposer.compose(base: snapshot.image, viewBounds: bounds, selection: selection, annotations: annotations)
     }
 
     func showTransientMessage(_ message: String) {

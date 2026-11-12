@@ -181,6 +181,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.hidesAuxiliaryWindowsDuringCapture =
             UserDefaults.standard.object(forKey: Self.hideAuxiliaryWindowsKey) as? Bool ?? true
         installStatusItem()
+        if captureSmokePath == nil { DesktopCaptureService.prewarmDisplayFilters() }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(displayConfigurationChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
         let hotKeyRegistered = registerHotKey(shortcut)
         if !hotKeyRegistered {
             statusItem?.button?.toolTip = "WeShot · \(shortcut.displayName) 已被其他应用占用，可从菜单截图"
@@ -333,7 +340,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     exit(EXIT_FAILURE)
                 }
                 do {
+                    guard let screen = NSScreen.screens.first,
+                          let displayID = DesktopCaptureService.displayID(for: screen)
+                    else { throw ScreenCaptureFailure.noScreens }
+                    for sample in 1...2 {
+                        let displayStarted = ProcessInfo.processInfo.systemUptime
+                        do {
+                            _ = try await DesktopCaptureService.captureDisplay(displayID: displayID, screen: screen)
+                            print(String(format: "CAPTURE_TIMING path=display sample=%d milliseconds=%.1f", sample,
+                                         (ProcessInfo.processInfo.systemUptime - displayStarted) * 1_000))
+                        } catch {
+                            print("CAPTURE_TIMING path=display sample=\(sample) failed=\(error.localizedDescription)")
+                        }
+                        if #available(macOS 15.2, *) {
+                            let rectStarted = ProcessInfo.processInfo.systemUptime
+                            do {
+                                _ = try await DesktopCaptureService.capture(rect: CGDisplayBounds(displayID))
+                                print(String(format: "CAPTURE_TIMING path=rect sample=%d milliseconds=%.1f", sample,
+                                             (ProcessInfo.processInfo.systemUptime - rectStarted) * 1_000))
+                            } catch {
+                                print("CAPTURE_TIMING path=rect sample=\(sample) failed=\(error.localizedDescription)")
+                            }
+                        }
+                    }
+                    let captureStarted = ProcessInfo.processInfo.systemUptime
                     let snapshots = try await DesktopCaptureService.captureAllScreens()
+                    let captureMilliseconds = (ProcessInfo.processInfo.systemUptime - captureStarted) * 1_000
                     guard let first = snapshots.first,
                           let png = ImageComposer.pngData(first.image)
                     else {
@@ -350,7 +382,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     try png.write(to: url, options: .atomic)
                     print(
                         "CAPTURE_SMOKE PASS displays=\(snapshots.count) " +
-                            "size=\(first.image.width)x\(first.image.height) path=\(url.path)"
+                            "size=\(first.image.width)x\(first.image.height) path=\(url.path) " +
+                            String(format: "all_screens_ms=%.1f", captureMilliseconds)
                     )
                     fflush(stdout)
                     exit(EXIT_SUCCESS)
@@ -418,6 +451,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func captureFromMenu() { coordinator.startCapture() }
 
+    @objc private func displayConfigurationChanged() {
+        DesktopCaptureService.prewarmDisplayFilters()
+    }
+
     @objc private func changeShortcutFromMenu() {
         let recorder = HotKeyRecorderField(shortcut: shortcut)
         let alert = NSAlert()
@@ -478,10 +515,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(EXIT_FAILURE)
             }
             let displayCount = overlays.count
+            let timings = self.coordinator.lastCaptureTimings
             self.coordinator.cancelCapture()
             print(
                 "HOTKEY_PHYSICAL_SMOKE PASS shortcut=⌃⌘A dispatch=cghid-event-tap " +
-                    "capture=PASS overlay=PASS displays=\(displayCount)"
+                    "capture=PASS overlay=PASS displays=\(displayCount) " +
+                    String(format: "image_ms=%.1f overlay_ms=%.1f", timings?.imageMilliseconds ?? -1,
+                           timings?.overlayMilliseconds ?? -1)
             )
             fflush(stdout)
             exit(EXIT_SUCCESS)
@@ -774,6 +814,22 @@ enum CommandLineMode {
         let resized = ResizeAnchor.east.resized(CGRect(x: 100, y: 100, width: 200, height: 160), translation: CGSize(width: 50, height: 0), inside: bounds)
         if resized.width != 250 { failures.append("east resize") }
 
+        do {
+            let source = try DesktopCaptureService.selectionSourceRect(
+                localRect: CGRect(x: 10.25, y: 20.25, width: 40.25, height: 30.25),
+                viewBounds: CGRect(x: 0, y: 0, width: 100, height: 80),
+                screenSize: CGSize(width: 200, height: 160), scale: 2
+            )
+            if source != CGRect(x: 20.5, y: 59, width: 80.5, height: 60.5) {
+                failures.append("display selection coordinates")
+            }
+        } catch {
+            failures.append("display selection coordinates: \(error.localizedDescription)")
+        }
+        if (try? DesktopCaptureService.selectionSourceRect(
+            localRect: .zero, viewBounds: bounds, screenSize: bounds.size, scale: 2
+        )) != nil { failures.append("invalid display selection accepted") }
+
         let toolbar = ToolbarLayout.frame(for: CGRect(x: 180, y: 100, width: 420, height: 320), in: bounds)
         if !bounds.contains(toolbar) { failures.append("toolbar placement") }
 
@@ -796,7 +852,7 @@ enum CommandLineMode {
         if Array(png.prefix(4)) != [0x89, 0x50, 0x4E, 0x47] { failures.append("PNG signature") }
 
         if failures.isEmpty {
-            return TestResult(passed: true, message: "SELF_TEST PASS — geometry, toolbar, six annotations, composition, PNG")
+            return TestResult(passed: true, message: "SELF_TEST PASS — geometry, display selection, toolbar, six annotations, composition, PNG")
         }
         return TestResult(passed: false, message: "SELF_TEST FAIL: \(failures.joined(separator: ", "))")
     }

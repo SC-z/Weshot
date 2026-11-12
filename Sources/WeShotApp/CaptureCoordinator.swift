@@ -4,6 +4,7 @@ import CoreGraphics
 import UniformTypeIdentifiers
 import WeShotCore
 
+@MainActor
 struct ScreenSnapshot {
     let screen: NSScreen
     let displayID: CGDirectDisplayID
@@ -24,29 +25,42 @@ enum ScreenCaptureFailure: LocalizedError {
 
 @MainActor
 enum DesktopCaptureService {
+    private struct DisplayLayout: Equatable {
+        let id: CGDirectDisplayID
+        let frame: CGRect
+        let scale: CGFloat
+    }
+
+    private static var filterLayout: [DisplayLayout] = []
+    private static var filterTask: Task<[CGDirectDisplayID: SCContentFilter], Error>?
+
     static func captureAllScreens() async throws -> [ScreenSnapshot] {
         let screens = NSScreen.screens
         guard !screens.isEmpty else { throw ScreenCaptureFailure.noScreens }
+        // Start every display before awaiting results, but preserve screen order.
+        let captures = screens.map { screen in
+            Task { @MainActor in
+                guard let displayID = displayID(for: screen) else {
+                    throw ScreenCaptureFailure.captureFailed("无法读取显示器标识")
+                }
+                let image: CGImage
+                do {
+                    image = try await captureDisplay(displayID: displayID, screen: screen)
+                } catch {
+                    if #available(macOS 15.2, *) {
+                        image = try await capture(rect: CGDisplayBounds(displayID))
+                    } else {
+                        throw error
+                    }
+                }
+                return ScreenSnapshot(screen: screen, displayID: displayID, image: image)
+            }
+        }
         var snapshots: [ScreenSnapshot] = []
         var failures: [String] = []
-        for screen in screens {
-            guard let displayID = displayID(for: screen) else {
-                failures.append("\(screen.localizedName)：无法读取显示器标识")
-                continue
-            }
+        for (screen, task) in zip(screens, captures) {
             do {
-                let captureRect = CGDisplayBounds(displayID)
-                let image: CGImage
-                if #available(macOS 15.2, *) {
-                    do {
-                        image = try await capture(rect: captureRect)
-                    } catch {
-                        image = try await captureDisplayFallback(displayID: displayID, screen: screen)
-                    }
-                } else {
-                    image = try await captureDisplayFallback(displayID: displayID, screen: screen)
-                }
-                snapshots.append(ScreenSnapshot(screen: screen, displayID: displayID, image: image))
+                snapshots.append(try await task.value)
             } catch {
                 failures.append("\(screen.localizedName)：\(error.localizedDescription)")
             }
@@ -58,8 +72,7 @@ enum DesktopCaptureService {
         return snapshots
     }
 
-    /// macOS 15.2's direct screenshot API avoids creating a stream and is called
-    /// before any WeShot overlay window is made visible.
+    /// Last-resort desktop capture; scrolling frames always remain display-bound.
     @available(macOS 15.2, *)
     static func capture(rect: CGRect) async throws -> CGImage {
         try await withCheckedThrowingContinuation { continuation in
@@ -73,46 +86,99 @@ enum DesktopCaptureService {
         }
     }
 
-    static func captureDisplayFallback(displayID: CGDirectDisplayID, screen: NSScreen) async throws -> CGImage {
-        let content = try await SCShareableContent.current
-        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
-            throw ScreenCaptureFailure.captureFailed("无法匹配显示器 \(displayID)")
+    static func prewarmDisplayFilters() {
+        guard CGPreflightScreenCaptureAccess() else { return }
+        Task { _ = try? await displayFilters() }
+    }
+
+    private static func displayFilters() async throws -> [CGDirectDisplayID: SCContentFilter] {
+        let layout = NSScreen.screens.compactMap { screen -> DisplayLayout? in
+            guard let id = displayID(for: screen) else { return nil }
+            return DisplayLayout(id: id, frame: screen.frame, scale: screen.backingScaleFactor)
         }
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        if filterTask == nil || layout != filterLayout {
+            filterLayout = layout
+            // Only display metadata is retained. Pixel data is always captured on demand.
+            filterTask = Task {
+                let content = try await SCShareableContent.current
+                return Dictionary(uniqueKeysWithValues: content.displays.map {
+                    ($0.displayID, SCContentFilter(display: $0, excludingWindows: []))
+                })
+            }
+        }
+        do {
+            return try await filterTask!.value
+        } catch {
+            if filterLayout == layout { filterTask = nil }
+            throw error
+        }
+    }
+
+    static func captureDisplay(displayID: CGDirectDisplayID, screen: NSScreen) async throws -> CGImage {
         let configuration = SCStreamConfiguration()
         configuration.width = Int(screen.frame.width * screen.backingScaleFactor)
         configuration.height = Int(screen.frame.height * screen.backingScaleFactor)
-        configuration.showsCursor = false
-        return try await withCheckedThrowingContinuation { continuation in
-            SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
-                if let image {
-                    continuation.resume(returning: image)
-                } else {
-                    continuation.resume(throwing: error ?? ScreenCaptureFailure.captureFailed("显示器降级捕获失败"))
+        return try await captureDisplay(displayID: displayID, configuration: configuration)
+    }
+
+    private static func captureDisplay(displayID: CGDirectDisplayID, configuration: SCStreamConfiguration, retrying: Bool = true) async throws -> CGImage {
+        do {
+            guard let filter = try await displayFilters()[displayID] else {
+                throw ScreenCaptureFailure.captureFailed("无法匹配显示器 \(displayID)")
+            }
+            configuration.showsCursor = false
+            return try await withCheckedThrowingContinuation { continuation in
+                SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
+                    if let image {
+                        continuation.resume(returning: image)
+                    } else {
+                        continuation.resume(throwing: error ?? ScreenCaptureFailure.captureFailed("显示器捕获失败"))
+                    }
                 }
             }
+        } catch {
+            filterTask = nil
+            guard retrying else { throw error }
+            return try await captureDisplay(displayID: displayID, configuration: configuration, retrying: false)
         }
     }
 
     static func captureSelection(snapshot: ScreenSnapshot, localRect: CGRect, viewBounds: CGRect) async throws -> CGImage {
+        let sourceRect = try selectionSourceRect(
+            localRect: localRect,
+            viewBounds: viewBounds,
+            screenSize: snapshot.screen.frame.size,
+            scale: snapshot.screen.backingScaleFactor
+        )
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = sourceRect
+        configuration.width = Int((sourceRect.width * snapshot.screen.backingScaleFactor).rounded())
+        configuration.height = Int((sourceRect.height * snapshot.screen.backingScaleFactor).rounded())
+        // Bind to the display to avoid stale rect-only captures after focus changes.
+        return try await captureDisplay(displayID: snapshot.displayID, configuration: configuration)
+    }
+
+    static func selectionSourceRect(localRect: CGRect, viewBounds: CGRect, screenSize: CGSize, scale: CGFloat) throws -> CGRect {
+        guard viewBounds.width > 0, viewBounds.height > 0,
+              screenSize.width > 0, screenSize.height > 0, scale > 0,
+              [localRect.minX, localRect.minY, localRect.width, localRect.height,
+               viewBounds.minX, viewBounds.minY, viewBounds.width, viewBounds.height,
+               screenSize.width, screenSize.height, scale].allSatisfy(\.isFinite)
+        else { throw ScreenCaptureFailure.captureFailed("滚动截图选区无效") }
         let rect = localRect.standardized.intersection(viewBounds)
         guard !rect.isNull, rect.width >= 1, rect.height >= 1 else {
             throw ScreenCaptureFailure.captureFailed("滚动截图选区无效")
         }
-        // The rect-only screenshot API can return a stale image after the
-        // overlay yields focus on macOS 15.x. Bind every scrolling frame to
-        // its display, then crop the live display image instead.
-        let full = try await captureDisplayFallback(displayID: snapshot.displayID, screen: snapshot.screen)
         let pixelRect = CGRect(
-            x: rect.minX / viewBounds.width * CGFloat(full.width),
-            y: (viewBounds.maxY - rect.maxY) / viewBounds.height * CGFloat(full.height),
-            width: rect.width / viewBounds.width * CGFloat(full.width),
-            height: rect.height / viewBounds.height * CGFloat(full.height)
-        ).integral
-        guard let crop = full.cropping(to: pixelRect) else {
-            throw ScreenCaptureFailure.captureFailed("无法裁剪滚动截图帧")
-        }
-        return crop
+            x: (rect.minX - viewBounds.minX) / viewBounds.width * screenSize.width * scale,
+            y: (viewBounds.maxY - rect.maxY) / viewBounds.height * screenSize.height * scale,
+            width: rect.width / viewBounds.width * screenSize.width * scale,
+            height: rect.height / viewBounds.height * screenSize.height * scale
+        ).integral.intersection(CGRect(origin: .zero, size: CGSize(
+            width: screenSize.width * scale, height: screenSize.height * scale
+        )))
+        return CGRect(x: pixelRect.minX / scale, y: pixelRect.minY / scale,
+                      width: pixelRect.width / scale, height: pixelRect.height / scale)
     }
 
     static func displayID(for screen: NSScreen) -> CGDirectDisplayID? {
@@ -165,8 +231,10 @@ final class CaptureCoordinator: NSObject {
     private var pins: [PinWindowController] = []
     private var messagePanels: [MessagePanelController] = []
     private var captureInProgress = false
+    private(set) var lastCaptureTimings: (imageMilliseconds: Double, overlayMilliseconds: Double)?
     private var captureSessionID: UUID?
     private var permissionController: PermissionWindowController?
+    private var requestedScreenCaptureAccess = false
     private var sourceApplication: NSRunningApplication?
     private weak var scrollingOverlay: OverlayWindowController?
     private var scrollControl: ScrollControlPanelController?
@@ -180,23 +248,34 @@ final class CaptureCoordinator: NSObject {
 
     func startCapture() {
         guard overlays.isEmpty, !captureInProgress else { return }
+        let started = ProcessInfo.processInfo.systemUptime
         if let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
             sourceApplication = frontmost
         }
-        if !CGPreflightScreenCaptureAccess() {
-            _ = CGRequestScreenCaptureAccess()
+        var hasAccess = CGPreflightScreenCaptureAccess()
+        if !hasAccess, !requestedScreenCaptureAccess {
+            requestedScreenCaptureAccess = true
+            hasAccess = CGRequestScreenCaptureAccess()
+        }
+        if !hasAccess {
             showPermissionWindow()
             return
         }
         captureInProgress = true
+        lastCaptureTimings = nil
         Task { @MainActor in
             defer { captureInProgress = false }
             let hiddenWindows = temporarilyHideAuxiliaryWindows()
             defer { restoreAuxiliaryWindows(hiddenWindows) }
             do {
                 let snapshots = try await DesktopCaptureService.captureAllScreens()
+                let captured = ProcessInfo.processInfo.systemUptime
                 showOverlays(for: snapshots)
+                lastCaptureTimings = (
+                    (captured - started) * 1_000,
+                    (ProcessInfo.processInfo.systemUptime - captured) * 1_000
+                )
             } catch {
                 showError(error.localizedDescription)
             }
@@ -314,7 +393,7 @@ final class CaptureCoordinator: NSObject {
     }
 
     func translateText(from overlay: OverlayWindowController) {
-        guard let image = overlay.composedImage(), let sessionID = captureSessionID else { return }
+        guard let image = overlay.composedImage(excludingTranslation: true), let sessionID = captureSessionID else { return }
         overlay.showTransientMessage("正在提取并翻译…")
         Task { @MainActor [weak self, weak overlay] in
             guard let self, let overlay else { return }
@@ -504,12 +583,13 @@ final class CaptureCoordinator: NSObject {
             scrollControl?.updateStatus("首帧已就绪，开始滚动")
             return
         }
+        guard let previous = overlay.scrollFramesForCompletion.dropLast().last else { return }
         let task = Task { @MainActor [weak self, weak overlay] in
             defer {
                 if self?.scrollSessionID == sessionID { self?.scrollPreviewTask = nil }
             }
             do {
-                let result = try await CoreServiceBridge.stitch(frames: [current, newest])
+                let result = try await CoreServiceBridge.appendScrollFrame(newest, to: current, previous: previous)
                 guard let self, let overlay,
                       !Task.isCancelled,
                       self.scrollSessionID == sessionID,
@@ -529,8 +609,8 @@ final class CaptureCoordinator: NSObject {
                     self.scrollControl?.updateStatus("等待页面滚动…")
                     return
                 }
-                overlay.showTransientMessage("本次滚动无法拼接，已保留当前预览")
-                self.scrollControl?.updateStatus("本帧无法拼接，继续滚动")
+                overlay.showTransientMessage("无法对齐，已保留当前预览；请回到中断位置再继续")
+                self.scrollControl?.updateStatus("截图已中断，请回到中断位置再继续")
             }
         }
         scrollPreviewTask = task
@@ -621,7 +701,10 @@ final class CaptureCoordinator: NSObject {
         }
         let controller = PermissionWindowController()
         controller.onRetry = { [weak self, weak controller] in
-            guard CGPreflightScreenCaptureAccess() else { return }
+            guard CGPreflightScreenCaptureAccess() else {
+                self?.showError("系统仍未认可当前版本的授权。若设置中已开启，请先退出并重新打开 /Applications 中的 WeShot；更新前后的签名身份不同也会导致旧授权失效。")
+                return
+            }
             controller?.close()
             self?.startCapture()
         }

@@ -121,12 +121,12 @@ enum ScrollSystemSmokeRunner {
         }
 
         var stitched = frames[0]
-        for frame in frames.dropFirst() {
-            stitched = try await CoreServiceBridge.stitch(frames: [stitched, frame])
+        for (previous, frame) in zip(frames, frames.dropFirst()) {
+            stitched = try await CoreServiceBridge.appendScrollFrame(frame, to: stitched, previous: previous)
         }
         guard let first = frames.first,
               stitched.width == first.width,
-              stitched.height > first.height + first.height / 2
+              stitched.height == first.height + Int((offsets.last ?? 0) * screen.backingScaleFactor)
         else {
             throw ScrollSystemSmokeFailure.invalidStitchedSize
         }

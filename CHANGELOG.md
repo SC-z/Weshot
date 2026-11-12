@@ -1,5 +1,23 @@
 # Changelog / 更新日志
 
+## 2.0.3 - 2026-11-12
+
+- Add a menu beside the translation icon to save separate target languages for Chinese and other source languages.
+  翻译图标旁新增菜单，可分别保存中文和其他语言的翻译目标。
+- Exclude the previous translation layer when recognizing text for another translation.
+  重新翻译时，文字识别跳过上一次的译文图层。
+
+## 2.0.2 - 2026-11-05
+
+- Reuse display metadata, capture displays concurrently, and capture scrolling regions directly.
+  复用显示器元数据、并发采集多屏，长截图直接采集选区。
+- Reject sparse-text and near-ambiguous scrolling matches; align against the last accepted viewport and remove repeated fixed footers.
+  拒绝白底文字误匹配和近似歧义，使用上一张原始画面定位，并移除接缝中的重复固定页脚。
+- Fix text-draft cancellation, pen clicks and release endpoints, and oversized pinned images moving offscreen while zooming.
+  修复文字草稿取消、画笔单点及松手末端遗漏、超高钉图缩放离屏的问题。
+- Pin the signing certificate across updates, limit repeated permission requests, and add a signed DMG packaging script.
+  固定更新签名证书、限制重复授权请求，新增固定签名 DMG 打包脚本。
+
 ## 2.0.1 - 2026-07-22
 
 ### Fixed / 修复
